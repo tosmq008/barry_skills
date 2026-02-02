@@ -1,0 +1,12 @@
+{
+  "status": "ready",
+  "current_task": 1,
+  "total_tasks": 3,
+  "tasks": [
+    {"id": 1, "name": "创建 hello.txt 内容为 Hello", "status": "pending"},
+    {"id": 2, "name": "创建 world.txt 内容为 World", "status": "pending"},
+    {"id": 3, "name": "创建 done.txt 内容为 Done", "status": "pending"}
+  ],
+  "completed": [],
+  "last_update": null
+}

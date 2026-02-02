@@ -1,0 +1,26 @@
+{
+  "version": "3.1.0",
+  "project": {
+    "name": "计数器App",
+    "path": "/Users/yinlianbang/work_ai/barry_skills/poc-test/continuous-dev-poc/test-project"
+  },
+  "workflow": {
+    "current_phase": "completed",
+    "iteration": 1
+  },
+  "status": "completed",
+  "exit_reason": "success",
+  "current_task": {
+    "name": "完成",
+    "checkpoint": {
+      "phase": "Phase 4: 测试",
+      "step": "功能测试通过",
+      "next": null
+    }
+  },
+  "sessions": {
+    "count": 1
+  },
+  "last_heartbeat": "2026-01-31T10:40:00Z",
+  "errors": []
+}
