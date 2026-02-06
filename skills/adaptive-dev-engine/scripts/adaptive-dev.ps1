@@ -121,13 +121,32 @@ function Get-ProjectState {
     if ((Test-Path "docs\prd") -and (Get-ChildItem "docs\prd\*.md" -ErrorAction SilentlyContinue)) {
         return "has_docs"
     }
-    if ((Test-Path "PRD.md") -or (Test-Path "requirements.md")) {
+    if ((Test-Path "PRD.md") -or (Test-Path "requirements.md") -or (Test-Path "README.md")) {
         return "has_docs"
     }
 
-    # 4. 检查是否有代码
-    if ((Test-Path "src") -or (Test-Path "client") -or (Test-Path "admin") -or (Test-Path "app")) {
-        return "has_docs"
+    # 4. 检查是否有代码目录 (常见项目结构)
+    $codeDirs = @("src", "client", "admin", "app", "backend", "frontend", "server", "api", "lib", "packages", "modules")
+    foreach ($dir in $codeDirs) {
+        if (Test-Path $dir) {
+            return "has_docs"
+        }
+    }
+
+    # 5. 检查是否有项目配置文件 (各种语言/框架)
+    $configFiles = @("package.json", "pyproject.toml", "requirements.txt", "Cargo.toml", "go.mod", "pom.xml", "build.gradle", "Gemfile", "composer.json", "Makefile", "CMakeLists.txt")
+    foreach ($file in $configFiles) {
+        if (Test-Path $file) {
+            return "has_docs"
+        }
+    }
+
+    # 6. 检查是否有代码文件 (至少有一个)
+    $codeExtensions = @("*.py", "*.js", "*.ts", "*.go", "*.rs", "*.java", "*.rb", "*.php", "*.c", "*.cpp", "*.h")
+    foreach ($ext in $codeExtensions) {
+        if (Get-ChildItem $ext -ErrorAction SilentlyContinue | Select-Object -First 1) {
+            return "has_docs"
+        }
     }
 
     return "empty"

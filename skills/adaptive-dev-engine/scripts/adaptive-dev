@@ -75,13 +75,29 @@ detect_project_state() {
         return
     fi
 
-    if [ -f "PRD.md" ] || [ -f "requirements.md" ]; then
+    if [ -f "PRD.md" ] || [ -f "requirements.md" ] || [ -f "README.md" ]; then
         echo "has_docs"
         return
     fi
 
-    # 4. 检查是否有代码
-    if [ -d "src" ] || [ -d "client" ] || [ -d "admin" ] || [ -d "app" ]; then
+    # 4. 检查是否有代码目录 (常见项目结构)
+    if [ -d "src" ] || [ -d "client" ] || [ -d "admin" ] || [ -d "app" ] || \
+       [ -d "backend" ] || [ -d "frontend" ] || [ -d "server" ] || [ -d "api" ] || \
+       [ -d "lib" ] || [ -d "packages" ] || [ -d "modules" ]; then
+        echo "has_docs"
+        return
+    fi
+
+    # 5. 检查是否有项目配置文件 (各种语言/框架)
+    if [ -f "package.json" ] || [ -f "pyproject.toml" ] || [ -f "requirements.txt" ] || \
+       [ -f "Cargo.toml" ] || [ -f "go.mod" ] || [ -f "pom.xml" ] || [ -f "build.gradle" ] || \
+       [ -f "Gemfile" ] || [ -f "composer.json" ] || [ -f "Makefile" ] || [ -f "CMakeLists.txt" ]; then
+        echo "has_docs"
+        return
+    fi
+
+    # 6. 检查是否有代码文件 (至少有一个)
+    if ls *.py *.js *.ts *.go *.rs *.java *.rb *.php *.c *.cpp *.h 2>/dev/null | head -1 &>/dev/null; then
         echo "has_docs"
         return
     fi
