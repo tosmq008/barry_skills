@@ -4,7 +4,8 @@
       "Bash(powershell -Command \"echo $env:USERPROFILE\")",
       "Bash(powershell -Command \"Write-Host $env:USERPROFILE\")",
       "Bash(set)",
-      "Bash(powershell -Command \"[Environment]::GetFolderPath\\(''ApplicationData''\\)\")"
+      "Bash(powershell -Command \"[Environment]::GetFolderPath\\(''ApplicationData''\\)\")",
+      "Bash(wc:*)"
     ]
   }
 }
