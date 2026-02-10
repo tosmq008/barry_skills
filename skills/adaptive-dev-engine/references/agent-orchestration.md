@@ -44,12 +44,63 @@ Task(subagent_type="general-purpose", prompt="使用 frontend-expert...", run_in
 
 ---
 
+## 冲突避免：Prompt 约束（替代文件锁）
+
+文件锁机制不可靠（子 Agent 不会主动使用），改为在每个 Agent 的 prompt 中**显式声明可操作的目录范围**。
+
+### 目录分离规则
+
+| Agent | 允许修改的目录 | 禁止修改的目录 |
+|-------|---------------|---------------|
+| product-expert | `docs/prd/`, `docs/ui/` | `src/`, `tests/`, `client/` |
+| tech-manager | `docs/tech/`, 项目配置文件 | `src/` 具体实现代码 |
+| python-expert | `src/`, `backend/`, `app/`, `server/` | `client/`, `frontend/`, `web/` |
+| frontend-expert | `client/`, `frontend/`, `web/` | `src/`, `backend/`, `app/`, `server/` |
+| test-expert | `tests/`, `docs/test/` | `src/`, `client/` |
+| test-report-followup | 根据 bug 所在模块决定 | 非相关模块 |
+
+### Prompt 约束模板
+
+在调度每个 Agent 时，prompt 中必须包含以下约束：
+
+```
+## 文件操作约束（必须遵守）
+
+你只能修改以下目录中的文件：
+- {allowed_dirs}
+
+你不能修改以下目录中的文件：
+- {forbidden_dirs}
+
+如果你需要修改约束范围外的文件，请在状态文件中记录需求，由主控 Agent 协调处理。
+```
+
+**示例 - python-expert 的 prompt：**
+```
+## 文件操作约束（必须遵守）
+
+你只能修改以下目录中的文件：
+- src/
+- backend/
+- app/
+- server/
+- requirements.txt / pyproject.toml
+
+你不能修改以下目录中的文件：
+- client/
+- frontend/
+- web/
+- docs/prd/
+```
+
+---
+
 ## 并行执行模式
 
 ### 模式 1: 前后端并行开发
 
 ```
-场景: 健康度 40-60，需要实现功能
+场景: code 维度最弱且 score >= 10
 
 ┌─────────────────────────────────────────┐
 │           adaptive-dev-engine            │
@@ -62,9 +113,9 @@ Task(subagent_type="general-purpose", prompt="使用 frontend-expert...", run_in
 │ python-expert │       │frontend-expert│
 │  (后端 API)   │       │  (前端 UI)    │
 │               │       │               │
-│ - 数据模型    │       │ - 页面组件    │
-│ - API 接口    │       │ - 状态管理    │
-│ - 业务逻辑    │       │ - API 对接    │
+│ 约束: src/    │       │ 约束: client/ │
+│ backend/      │       │ frontend/     │
+│ app/          │       │ web/          │
 └───────┬───────┘       └───────┬───────┘
         │                       │
         └───────────┬───────────┘
@@ -89,25 +140,20 @@ backend_task = Task(
 ## 任务列表
 {backend_tasks}
 
-## API 规范
-- RESTful 风格
-- 统一响应格式
-- 错误处理
+## 文件操作约束（必须遵守）
+你只能修改以下目录中的文件：
+- src/
+- backend/
+- app/
+- server/
+
+你不能修改以下目录中的文件：
+- client/
+- frontend/
+- web/
 
 ## 完成后
-更新 .dev-state/state.json:
-```python
-import json
-with open('.dev-state/state.json', 'r') as f:
-    state = json.load(f)
-state['agent_coordination']['completed_agents'].append({{
-    'agent': 'python-expert',
-    'task': 'backend_development',
-    'status': 'completed'
-}})
-with open('.dev-state/state.json', 'w') as f:
-    json.dump(state, f, indent=2)
-```
+将执行结果写入 .dev-state/agents/python-expert.json
 """,
     run_in_background=True
 )
@@ -121,14 +167,23 @@ frontend_task = Task(
 ## 任务列表
 {frontend_tasks}
 
+## 文件操作约束（必须遵守）
+你只能修改以下目录中的文件：
+- client/
+- frontend/
+- web/
+
+你不能修改以下目录中的文件：
+- src/
+- backend/
+- app/
+- server/
+
 ## API 接口文档
 {api_spec}
 
-## UI 设计稿
-{ui_design}
-
 ## 完成后
-更新 .dev-state/state.json
+将执行结果写入 .dev-state/agents/frontend-expert.json
 """,
     run_in_background=True
 )
@@ -137,26 +192,27 @@ frontend_task = Task(
 ### 模式 2: 测试与修复并行
 
 ```
-场景: 健康度 60-75，需要测试和修复
+场景: tests 维度最弱，同时有已知 bug
 
 ┌─────────────────────────────────────────┐
 │           adaptive-dev-engine            │
 │              (主控)                      │
 └───────────────────┬─────────────────────┘
                     │
-    ┌───────────────┼───────────────┐
-    ▼               ▼               ▼
-┌─────────┐   ┌─────────┐   ┌─────────┐
-│  test-  │   │ python- │   │frontend-│
-│  expert │   │  expert │   │ expert  │
-│(测试)   │   │(修后端) │   │(修前端) │
-└────┬────┘   └────┬────┘   └────┬────┘
-     │             │             │
-     └─────────────┴─────────────┘
-                   ▼
-           ┌─────────────┐
-           │  回归验证    │
-           └─────────────┘
+        ┌───────────┴───────────┐
+        ▼                       ▼
+┌───────────────┐       ┌─────────────────┐
+│  test-expert  │       │test-report-     │
+│  (新增测试)   │       │followup (修bug) │
+│               │       │                 │
+│ 约束: tests/  │       │ 约束: 按bug模块 │
+└───────┬───────┘       └───────┬─────────┘
+        │                       │
+        └───────────┬───────────┘
+                    ▼
+            ┌─────────────┐
+            │  回归验证    │
+            └─────────────┘
 ```
 
 ### 模式 3: 多 Bug 并行修复
@@ -181,104 +237,97 @@ frontend_task = Task(
 
 ---
 
-## Agent 协调协议
+## 状态同步：Agent 独立状态文件
 
-### 状态同步
+每个 Agent 写入自己的独立状态文件，避免多 Agent 竞争写同一个 `state.json`。
 
-所有 Agent 通过 `.dev-state/state.json` 同步状态：
+### 目录结构
+
+```
+.dev-state/
+├── state.json                  # 主控读写，Agent 只读
+└── agents/                     # 每个 Agent 写自己的文件
+    ├── python-expert.json
+    ├── frontend-expert.json
+    ├── test-expert.json
+    └── product-expert.json
+```
+
+### Agent 状态文件格式
+
+每个 Agent 完成任务后写入 `.dev-state/agents/{agent-name}.json`：
 
 ```json
 {
-  "agent_coordination": {
-    "active_agents": [
-      {
-        "agent": "python-expert",
-        "task_id": "T001",
-        "task": "backend_development",
-        "status": "running",
-        "started_at": "2024-01-31T10:00:00Z",
-        "progress": "60%",
-        "current_file": "src/routes/user.py"
-      },
-      {
-        "agent": "frontend-expert",
-        "task_id": "T002",
-        "task": "frontend_development",
-        "status": "running",
-        "started_at": "2024-01-31T10:00:00Z",
-        "progress": "40%",
-        "current_file": "src/pages/Login.tsx"
-      }
-    ],
-    "completed_agents": [
-      {
-        "agent": "product-expert",
-        "task_id": "T000",
-        "task": "prd_creation",
-        "status": "completed",
-        "completed_at": "2024-01-31T09:30:00Z",
-        "result": "success",
-        "outputs": ["docs/prd/01-project-brief.md", "docs/prd/02-feature-architecture.md"]
-      }
-    ],
-    "pending_sync": false,
-    "last_sync": "2024-01-31T10:30:00Z"
-  }
+  "agent": "python-expert",
+  "task": "backend_development",
+  "status": "completed",
+  "started_at": "2024-01-31T10:00:00Z",
+  "completed_at": "2024-01-31T10:45:00Z",
+  "result": "success",
+  "outputs": [
+    "src/routes/user.py",
+    "src/models/user.py"
+  ],
+  "summary": "完成用户模块 API 开发，包含 CRUD 接口",
+  "issues": []
 }
 ```
 
-### Agent 状态更新
+### 主控汇总逻辑
 
-每个 Agent 在执行过程中应定期更新状态：
+主控 Agent（adaptive-dev-engine）负责读取所有 Agent 状态文件并汇总：
 
 ```python
-def update_agent_status(agent_name, status, progress=None, current_file=None):
-    """更新 Agent 执行状态"""
+import json
+from pathlib import Path
 
-    with open('.dev-state/state.json', 'r') as f:
-        state = json.load(f)
+def aggregate_agent_results():
+    """汇总所有 Agent 的执行结果"""
 
-    # 找到对应的 Agent
-    for agent in state['agent_coordination']['active_agents']:
-        if agent['agent'] == agent_name:
-            agent['status'] = status
-            if progress:
-                agent['progress'] = progress
-            if current_file:
-                agent['current_file'] = current_file
-            break
+    agents_dir = Path('.dev-state/agents')
+    if not agents_dir.exists():
+        return {'total_agents': 0, 'results': []}
 
-    state['last_heartbeat'] = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+    results = []
+    for agent_file in agents_dir.glob('*.json'):
+        with open(agent_file, 'r') as f:
+            results.append(json.load(f))
 
-    with open('.dev-state/state.json', 'w') as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
+    summary = {
+        'total_agents': len(results),
+        'success': len([r for r in results if r['result'] == 'success']),
+        'failed': len([r for r in results if r['result'] == 'failed']),
+        'outputs': [],
+        'issues': []
+    }
+
+    for r in results:
+        summary['outputs'].extend(r.get('outputs', []))
+        summary['issues'].extend(r.get('issues', []))
+
+    return summary
 ```
 
-### Agent 完成通知
+### Agent Prompt 中的状态写入指令
 
-Agent 完成任务后，移动到 completed_agents：
+每个 Agent 的 prompt 末尾应包含：
 
-```python
-def mark_agent_completed(agent_name, result, outputs=None):
-    """标记 Agent 完成"""
+```
+## 完成后（必须执行）
 
-    with open('.dev-state/state.json', 'r') as f:
-        state = json.load(f)
-
-    # 从 active 移到 completed
-    for i, agent in enumerate(state['agent_coordination']['active_agents']):
-        if agent['agent'] == agent_name:
-            completed_agent = state['agent_coordination']['active_agents'].pop(i)
-            completed_agent['status'] = 'completed'
-            completed_agent['completed_at'] = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-            completed_agent['result'] = result
-            if outputs:
-                completed_agent['outputs'] = outputs
-            state['agent_coordination']['completed_agents'].append(completed_agent)
-            break
-
-    with open('.dev-state/state.json', 'w') as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
+将你的执行结果写入 .dev-state/agents/{agent-name}.json，格式如下：
+{
+  "agent": "{agent-name}",
+  "task": "任务描述",
+  "status": "completed" 或 "failed",
+  "started_at": "ISO时间",
+  "completed_at": "ISO时间",
+  "result": "success" 或 "failed",
+  "outputs": ["修改的文件列表"],
+  "summary": "一句话总结完成了什么",
+  "issues": ["遇到的问题，如果有的话"]
+}
 ```
 
 ---
@@ -289,10 +338,10 @@ def mark_agent_completed(agent_name, result, outputs=None):
 
 ```python
 TASK_DEPENDENCIES = {
-    'backend_development': [],  # 无依赖，可立即开始
-    'frontend_development': ['api_spec'],  # 依赖 API 文档
-    'test_execution': ['backend_development', 'frontend_development'],  # 依赖开发完成
-    'bug_fix': ['test_execution'],  # 依赖测试报告
+    'backend_development': ['tech_design'],
+    'frontend_development': ['tech_design', 'api_spec'],
+    'test_execution': ['backend_development', 'frontend_development'],
+    'bug_fix': ['test_execution'],
 }
 ```
 
@@ -302,12 +351,15 @@ TASK_DEPENDENCIES = {
 def check_dependencies(task_type):
     """检查任务依赖是否满足"""
 
-    with open('.dev-state/state.json', 'r') as f:
-        state = json.load(f)
+    agents_dir = Path('.dev-state/agents')
+    completed_tasks = []
 
-    completed_tasks = [
-        a['task'] for a in state['agent_coordination']['completed_agents']
-    ]
+    if agents_dir.exists():
+        for agent_file in agents_dir.glob('*.json'):
+            with open(agent_file, 'r') as f:
+                data = json.load(f)
+            if data.get('result') == 'success':
+                completed_tasks.append(data['task'])
 
     dependencies = TASK_DEPENDENCIES.get(task_type, [])
 
@@ -320,148 +372,6 @@ def check_dependencies(task_type):
 
 ---
 
-## 冲突避免
-
-### 文件锁机制
-
-```python
-import os
-import json
-from pathlib import Path
-
-LOCK_DIR = '.dev-state/locks'
-
-def acquire_file_lock(agent_name, file_path):
-    """获取文件锁"""
-
-    Path(LOCK_DIR).mkdir(parents=True, exist_ok=True)
-
-    lock_file = Path(LOCK_DIR) / f"{file_path.replace('/', '_')}.lock"
-
-    if lock_file.exists():
-        with open(lock_file, 'r') as f:
-            lock_info = json.load(f)
-        if lock_info['agent'] != agent_name:
-            return False, f"文件被 {lock_info['agent']} 锁定"
-
-    with open(lock_file, 'w') as f:
-        json.dump({
-            'agent': agent_name,
-            'file': file_path,
-            'locked_at': datetime.utcnow().isoformat()
-        }, f)
-
-    return True, None
-
-def release_file_lock(agent_name, file_path):
-    """释放文件锁"""
-
-    lock_file = Path(LOCK_DIR) / f"{file_path.replace('/', '_')}.lock"
-
-    if lock_file.exists():
-        with open(lock_file, 'r') as f:
-            lock_info = json.load(f)
-        if lock_info['agent'] == agent_name:
-            lock_file.unlink()
-            return True
-
-    return False
-```
-
-### 目录分离
-
-为避免冲突，不同 Agent 应操作不同目录：
-
-| Agent | 主要操作目录 |
-|-------|-------------|
-| python-expert | `src/`, `backend/`, `app/` |
-| frontend-expert | `client/`, `frontend/`, `web/` |
-| test-expert | `tests/`, `docs/test/` |
-| product-expert | `docs/prd/`, `docs/ui/` |
-
----
-
-## 结果汇总
-
-### 汇总所有 Agent 结果
-
-```python
-def aggregate_agent_results():
-    """汇总所有完成的 Agent 结果"""
-
-    with open('.dev-state/state.json', 'r') as f:
-        state = json.load(f)
-
-    completed = state['agent_coordination']['completed_agents']
-
-    # 统计结果
-    summary = {
-        'total_agents': len(completed),
-        'success': len([a for a in completed if a['result'] == 'success']),
-        'failed': len([a for a in completed if a['result'] == 'failed']),
-        'outputs': []
-    }
-
-    for agent in completed:
-        if agent.get('outputs'):
-            summary['outputs'].extend(agent['outputs'])
-
-    # 估算健康度提升
-    health_delta = 0
-    delta_map = {
-        'prd_creation': 15,
-        'backend_development': 12,
-        'frontend_development': 12,
-        'test_execution': 10,
-        'bug_fix': 5
-    }
-
-    for agent in completed:
-        if agent['result'] == 'success':
-            health_delta += delta_map.get(agent['task'], 5)
-
-    summary['estimated_health_delta'] = health_delta
-
-    return summary
-```
-
-### 更新健康度
-
-```python
-def update_health_after_agents():
-    """Agent 完成后更新健康度"""
-
-    summary = aggregate_agent_results()
-
-    with open('.dev-state/state.json', 'r') as f:
-        state = json.load(f)
-
-    # 更新健康度
-    old_score = state['health']['score']
-    new_score = min(100, old_score + summary['estimated_health_delta'])
-
-    state['health']['score'] = new_score
-    state['health']['usable'] = new_score >= 80
-
-    # 记录到历史
-    state['action_history'].append({
-        'type': 'agent_batch_complete',
-        'agents': [a['agent'] for a in state['agent_coordination']['completed_agents']],
-        'health_delta': f"+{new_score - old_score}",
-        'completed_at': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-    })
-
-    # 清空已完成的 Agent
-    state['agent_coordination']['completed_agents'] = []
-
-    with open('.dev-state/state.json', 'w') as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
-
-    return new_score
-```
-
----
-
 ## 错误处理
 
 ### Agent 执行失败
@@ -470,30 +380,22 @@ def update_health_after_agents():
 def handle_agent_failure(agent_name, error):
     """处理 Agent 执行失败"""
 
-    with open('.dev-state/state.json', 'r') as f:
-        state = json.load(f)
+    # 读取该 Agent 的状态文件
+    agent_file = Path(f'.dev-state/agents/{agent_name}.json')
 
-    # 记录错误
-    if 'errors' not in state:
-        state['errors'] = []
-
-    state['errors'].append({
+    failure_record = {
         'agent': agent_name,
+        'status': 'failed',
+        'result': 'failed',
         'error': str(error),
-        'timestamp': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-    })
+        'completed_at': datetime.utcnow().isoformat()
+    }
 
-    # 从 active 移除
-    state['agent_coordination']['active_agents'] = [
-        a for a in state['agent_coordination']['active_agents']
-        if a['agent'] != agent_name
-    ]
+    with open(agent_file, 'w') as f:
+        json.dump(failure_record, f, indent=2, ensure_ascii=False)
 
-    with open('.dev-state/state.json', 'w') as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
-
-    # 决定是否重试
-    retry_count = len([e for e in state['errors'] if e['agent'] == agent_name])
+    # 检查历史失败次数（从 state.json 的 decision_log 中统计）
+    retry_count = count_recent_failures(agent_name)
 
     if retry_count < 3:
         return {'action': 'retry', 'delay': 60}
@@ -506,19 +408,53 @@ def handle_agent_failure(agent_name, error):
 ```python
 AGENT_TIMEOUT = 1800  # 30 分钟
 
-def check_agent_timeout():
-    """检查 Agent 是否超时"""
+def check_agent_timeout(active_agents):
+    """
+    检查 Agent 是否超时
 
-    with open('.dev-state/state.json', 'r') as f:
-        state = json.load(f)
+    Args:
+        active_agents: 当前正在运行的 Agent 列表
+            [{'agent': 'python-expert', 'started_at': '...'}]
+    """
 
     now = datetime.utcnow()
     timeout_agents = []
 
-    for agent in state['agent_coordination']['active_agents']:
+    for agent in active_agents:
         started = datetime.fromisoformat(agent['started_at'].replace('Z', ''))
         if (now - started).total_seconds() > AGENT_TIMEOUT:
             timeout_agents.append(agent['agent'])
 
     return timeout_agents
+```
+
+---
+
+## 结果汇总与健康度更新
+
+```python
+def update_health_after_agents():
+    """Agent 完成后，主控重新评估健康度"""
+
+    summary = aggregate_agent_results()
+
+    if summary['failed'] > 0:
+        print(f"警告: {summary['failed']} 个 Agent 执行失败")
+
+    # 重新运行健康度评估（而非简单加分）
+    # 健康度应该由实际项目状态决定，而非预估增量
+    new_health = assess_health()
+
+    # 记录到历史
+    state['health']['history'].append({
+        'score': new_health['score'],
+        'breakdown': new_health['breakdown'],
+        'session': state['sessions']['count'],
+        'agents_run': [r['agent'] for r in summary.get('results', [])]
+    })
+
+    # 清理 Agent 状态文件（归档到 completed）
+    archive_agent_results()
+
+    return new_health
 ```

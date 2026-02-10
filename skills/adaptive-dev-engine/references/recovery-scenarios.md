@@ -11,12 +11,16 @@
 | 进程崩溃 | 进程意外终止 | 从 checkpoint 恢复 |
 | 用户暂停 | 用户执行 pause | 等待 resume |
 | 达到可用 | 健康度 >= 80 | 生成报告并退出 |
+| 上下文耗尽 | context window 耗尽 | 自动重启（不计错误） |
+| 网络错误 | 连接失败/超时 | 等待 30s 后重试 |
+| 权限错误 | 401/403/API key | 告警，计入错误 |
+| 工具错误 | 工具执行失败 | 计入错误，带上下文重试 |
 
 ---
 
 ## 场景 1: 轮次限制退出
 
-**触发条件:** `turns_used >= max_turns` (默认 50)
+**触发条件:** `turns_used >= max_turns` (默认 40)
 
 **状态:**
 ```json
@@ -79,7 +83,7 @@ def resume_from_turns_limit():
 
 **恢复策略:**
 1. 守护进程立即启动新会话
-2. AI 重新评估健康度
+2. 守护进程自动运行 health-check.py 重新评估健康度
 3. 决定下一步行动
 
 ---
@@ -105,7 +109,7 @@ def resume_from_turns_limit():
 
 **恢复策略:**
 1. 守护进程等待 `RATE_LIMIT_WAIT` 秒 (默认 300)
-2. 指数退避: `wait * (2 ^ consecutive_limits)`
+2. 指数退避: `wait * (RATE_LIMIT_BACKOFF ^ consecutive_limits)，默认 RATE_LIMIT_BACKOFF=1.5`
 3. 最长等待 30 分钟
 4. 重试最多 3 次
 
@@ -113,10 +117,9 @@ def resume_from_turns_limit():
 ```bash
 handle_rate_limit() {
     local consecutive=$(get_json "['rate_limit_count']" || echo 0)
-    local wait=$((RATE_LIMIT_WAIT * (2 ** consecutive)))
+    local wait=$(python3 -c "print(int(min($RATE_LIMIT_WAIT * ($RATE_LIMIT_BACKOFF ** $consecutive), 1800)))")
 
-    # 最长 30 分钟
-    [ $wait -gt 1800 ] && wait=1800
+    # 最长 30 分钟（已在 python3 min() 中处理）
 
     log "限流等待 ${wait}s (第 $((consecutive+1)) 次)"
     sleep $wait
@@ -130,7 +133,7 @@ handle_rate_limit() {
 
 ## 场景 4: 心跳超时
 
-**触发条件:** `last_heartbeat` 超过 `HEARTBEAT_TIMEOUT` (默认 30 分钟)
+**触发条件:** `last_heartbeat` 超过 `HEARTBEAT_TIMEOUT` (默认 15 分钟)
 
 **状态:**
 ```json
@@ -153,7 +156,7 @@ def check_heartbeat_timeout():
     hb_time = datetime.fromisoformat(last_hb.replace('Z', ''))
     age = (datetime.utcnow() - hb_time).total_seconds()
 
-    return age > HEARTBEAT_TIMEOUT  # 默认 1800 秒
+    return age > HEARTBEAT_TIMEOUT  # 默认 900 秒
 ```
 
 **恢复策略:**
@@ -305,12 +308,73 @@ def handle_agent_failure(agent_name, error):
   },
   "session_info": {
     "id": "sess_005",
-    "turns_used": 45,
+    "turns_used": 38,
     "duration_seconds": 1800
   },
   "recovery_hint": "从 src/routes/user.py 继续实现 login 接口"
 }
 ```
+
+---
+
+## 场景 9: 上下文耗尽 (context_exhausted)
+
+**触发条件:** Claude 会话日志中出现 context window / token limit 相关错误
+
+**状态:**
+```json
+{
+  "status": "continue",
+  "exit_reason": "context_exhausted"
+}
+```
+
+**恢复策略:**
+1. 守护进程检测到 `context_exhausted` 退出类型
+2. **不计入错误计数** — 这是正常的上下文消耗，不是真正的错误
+3. 自动启动新会话（新会话自带全新上下文窗口）
+4. 新会话 prompt 包含提示："上次因上下文耗尽退出，请高效工作，必要时使用 /compact"
+5. checkpoint 确保工作不丢失
+
+**预防措施（AI 侧）:**
+- 在 prompt Rules 中提示 AI 主动执行 `/compact`
+- 在轮次接近限制时优先保存 checkpoint
+
+---
+
+## 场景 10: 网络错误 (network_error)
+
+**触发条件:** 会话日志中出现 ECONNREFUSED / ETIMEDOUT / connection refused 等网络错误
+
+**恢复策略:**
+1. 守护进程检测到 `network_error`
+2. **不计入错误计数** — 网络问题通常是暂时的
+3. 等待 30 秒后重试
+4. 注意：网络错误不触发 MAX_ERRORS 停止机制，守护进程将持续重试（每次等待 30s）
+
+---
+
+## 场景 11: 权限错误 (permission_error)
+
+**触发条件:** 会话日志中出现 permission denied / 401 / 403 / invalid API key
+
+**恢复策略:**
+1. 守护进程检测到 `permission_error`
+2. 发送告警通知
+3. **计入错误计数** — 权限问题通常需要人工介入
+4. 达到 MAX_ERRORS 后停止守护进程
+
+---
+
+## 场景 12: 工具执行失败 (tool_error)
+
+**触发条件:** 会话日志中出现 tool execution failed / command not found
+
+**恢复策略:**
+1. 守护进程记录错误上下文到 state.json
+2. 下次会话 prompt 包含上次错误信息
+3. AI 可以选择替代方案或跳过该操作
+4. 计入标准错误计数
 
 ---
 
@@ -348,6 +412,24 @@ recover_session() {
             log "异常退出，从 checkpoint 恢复"
             restore_checkpoint
             start_session
+            ;;
+        context_exhausted)
+            log "上下文耗尽，新会话自动恢复"
+            start_session  # 新会话 = 新上下文，无需特殊处理
+            ;;
+        network_error)
+            log "网络错误，等待后重试"
+            sleep 30
+            start_session
+            ;;
+        permission_error)
+            log "权限错误，告警并等待人工介入"
+            send_alert "ERROR" "权限错误"
+            # 不自动重试，等待人工修复
+            ;;
+        tool_error|agent_failure)
+            log "工具/Agent 错误，带上下文重试"
+            start_session  # prompt 会包含上次错误信息
             ;;
         usable_reached)
             log "项目完成！"

@@ -4,7 +4,7 @@
 
 ```json
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
 
   "project": {
     "name": "my-project",
@@ -22,6 +22,14 @@
       "runnable": 10,
       "quality": 5
     },
+    "details": {
+      "requirements": "4 PRD docs (complete)",
+      "code": "32 files (mostly complete)",
+      "tests": "6 test files",
+      "runnable": "Has deps + entry point",
+      "quality": "3 lint issues"
+    },
+    "delta": 20,
     "usable": false,
     "target": 80,
     "assessed_at": "2024-01-31T10:30:00Z",
@@ -63,7 +71,7 @@
     {
       "type": "create_requirements",
       "agents": ["product-expert"],
-      "health_delta": "+18",
+      "health_delta": 18,
       "completed_at": "2024-01-31T09:30:00Z",
       "result": "success"
     }
@@ -78,7 +86,7 @@
         "agents": ["python-expert", "frontend-expert"],
         "parallel": true
       },
-      "reason": "健康度 45 < 60，进入并行开发阶段"
+      "reason": "代码维度最弱 (10/25, 40%)，前后端并行开发"
     }
   ],
 
@@ -128,10 +136,18 @@
 | `action_done` | 当前行动完成 | 立即重启 |
 | `usable_reached` | 达到可用状态 | 停止 |
 | `blocked` | 行动阻塞 | 跳过并继续 |
-| `error` | 发生错误 | 重试或告警 |
+| `unknown_crash` | 无法分类的错误 | 计入错误，标准重试 |
 | `rate_limit` | 触发限流 | 等待后重试 |
 | `user_stop` | 用户停止 | 停止 |
+| `user_pause` | 用户暂停 | 等待恢复 |
+| `session_timeout` | 会话超时 | 重试 |
 | `heartbeat_timeout` | 心跳超时 | 强制重启 |
+| `process_crash` | 进程崩溃 | 从 checkpoint 恢复 |
+| `agent_failure` | Agent 执行失败 | 重试或跳过 |
+| `context_exhausted` | 上下文窗口耗尽 | 自动重启（不计错误） |
+| `network_error` | 网络连接错误 | 等待 30s 后重试 |
+| `permission_error` | 权限/认证错误 | 告警，需人工介入 |
+| `tool_error` | 工具执行失败 | 带错误上下文重试 |
 
 ### health.breakdown 健康度分解
 
@@ -143,12 +159,33 @@
 | `runnable` | 0-20 | 可运行性 |
 | `quality` | 0-15 | 代码质量 |
 
+| 字段 | 范围 | 说明 |
+|------|------|------|
+| `target` | int | 健康度目标分数（默认 80） |
+| `history` | array | 历史评分记录（最近 20 条） |
+
+### health.details 健康度详情 (v2.0 新增)
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `requirements` | string | 需求评分依据说明 |
+| `code` | string | 代码评分依据说明 |
+| `tests` | string | 测试评分依据说明 |
+| `runnable` | string | 可运行性评分依据说明 |
+| `quality` | string | 代码质量评分依据说明 |
+
+### health.delta 健康度变化 (v2.0 新增)
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `delta` | int | 本次评估与上次评估的分数差值 |
+
 ### current_action.type 行动类型
 
 | 类型 | 说明 | 常用 Agent |
 |------|------|------------|
 | `create_requirements` | 创建需求文档 | product-expert |
-| `design_and_setup` | 技术设计 | tech-manager |
+| `design_and_plan` | 技术设计 | tech-manager |
 | `parallel_development` | 并行开发 | python-expert + frontend-expert |
 | `test_and_fix` | 测试修复 | test-expert + python-expert |
 | `polish_and_verify` | 收尾优化 | test-report-followup |
@@ -170,7 +207,7 @@ def init_state(project_name, project_path, requirement=None):
     """初始化状态文件"""
 
     state = {
-        "version": "1.0.0",
+        "version": "2.0.0",
         "project": {
             "name": project_name,
             "path": project_path,
@@ -186,6 +223,8 @@ def init_state(project_name, project_path, requirement=None):
                 "runnable": 0,
                 "quality": 0
             },
+            "details": {},
+            "delta": 0,
             "usable": False,
             "target": 80,
             "assessed_at": None,
@@ -252,20 +291,26 @@ def update_heartbeat():
 
 ### 更新健康度
 
+> **注意（v2.0）:** 健康度由 `health-check.py` 独立更新，AI **不应**直接调用此函数。以下代码仅供理解数据结构参考。
+
 ```python
-def update_health(breakdown):
-    """更新健康度评分"""
+def update_health(breakdown, details=None):
+    """更新健康度评分（已由 health-check.py 替代，请勿手动调用）"""
 
     with open('.dev-state/state.json', 'r') as f:
         state = json.load(f)
 
+    old_score = state['health'].get('score', 0)
     total = sum(breakdown.values())
     now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
 
     state['health']['breakdown'] = breakdown
     state['health']['score'] = total
+    state['health']['delta'] = total - old_score
     state['health']['usable'] = total >= 80
     state['health']['assessed_at'] = now
+    if details is not None:
+        state['health']['details'] = details
     state['health']['history'].append({
         'timestamp': now,
         'score': total
@@ -430,8 +475,8 @@ project/
 └── .dev-state/
     ├── state.json          # 主状态文件
     ├── requirement.txt     # 原始需求（如有）
-    ├── locks/              # 文件锁目录
-    │   └── *.lock
+    ├── agents/             # Agent 独立状态文件
+    │   └── *.json
     ├── logs/               # 会话日志
     │   └── session-*.log
     └── checkpoints/        # 断点备份

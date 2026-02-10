@@ -1,32 +1,47 @@
 #!/bin/bash
-# adaptive-dev - 自适应持续开发守护脚本 v1.0
+# adaptive-dev - 自适应持续开发守护脚本 v2.0
 # 智能分析项目状态，动态调度多 Agent，持续迭代直到可用
+# v2.0: 独立健康度评估、完整上下文传递、文件锁、进程组隔离、git集成
 
-VERSION="1.0.0"
+VERSION="2.0.0"
 SCRIPT_NAME="adaptive-dev"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # ============================================
-# 配置
+# 加载配置 (项目级 > skill级 > 默认值)
 # ============================================
-STATE_DIR=".dev-state"
-MAX_TURNS=50
-MIN_INTERVAL=60
-MAX_INTERVAL=120
-RATE_LIMIT_WAIT=300
-MAX_ERRORS=5
-SESSION_TIMEOUT=1800
-HEARTBEAT_TIMEOUT=1800
+PROJECT_DIR="$(pwd)"
+if [ -f "$PROJECT_DIR/.dev-state/config.env" ]; then
+    source "$PROJECT_DIR/.dev-state/config.env"
+elif [ -f "$SCRIPT_DIR/config.env" ]; then
+    source "$SCRIPT_DIR/config.env"
+fi
+
+STATE_DIR="${STATE_DIR:-.dev-state}"
+MAX_TURNS="${MAX_TURNS:-40}"
+MIN_INTERVAL="${MIN_INTERVAL:-60}"
+MAX_INTERVAL="${MAX_INTERVAL:-120}"
+RATE_LIMIT_WAIT="${RATE_LIMIT_WAIT:-300}"
+RATE_LIMIT_BACKOFF="${RATE_LIMIT_BACKOFF:-1.5}"
+MAX_ERRORS="${MAX_ERRORS:-5}"
+SESSION_TIMEOUT="${SESSION_TIMEOUT:-1800}"
+HEARTBEAT_TIMEOUT="${HEARTBEAT_TIMEOUT:-900}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-20250514}"
-
-# Skill 路径 (支持自定义)
 SKILL_DIR="${SKILL_DIR:-$HOME/.claude/skills/adaptive-dev-engine}"
+GIT_AUTO_COMMIT="${GIT_AUTO_COMMIT:-true}"
+GIT_ROLLBACK_ON_FAILURE="${GIT_ROLLBACK_ON_FAILURE:-false}"
+MAX_TOTAL_SESSIONS="${MAX_TOTAL_SESSIONS:-100}"
+LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-7}"
+MAX_LOG_FILES="${MAX_LOG_FILES:-50}"
+ALERT_WEBHOOK="${ALERT_WEBHOOK:-}"
 
 # 路径
-PROJECT_DIR="$(pwd)"
 STATE_FILE="$PROJECT_DIR/$STATE_DIR/state.json"
 PID_FILE="$PROJECT_DIR/$STATE_DIR/daemon.pid"
 LOG_DIR="$PROJECT_DIR/$STATE_DIR/logs"
+CHECKPOINT_DIR="$PROJECT_DIR/$STATE_DIR/checkpoints"
 REQUIREMENT_FILE="$PROJECT_DIR/$STATE_DIR/requirement.txt"
+HEALTH_CHECK="$SCRIPT_DIR/health-check.py"
 
 # ============================================
 # 工具函数
@@ -37,71 +52,159 @@ log() {
 }
 
 get_json() {
-    python3 -c "import json; print(json.load(open('$STATE_FILE'))$1)" 2>/dev/null
+    STATE_FILE="$STATE_FILE" python3 -c "import json,os; print(json.load(open(os.environ['STATE_FILE']))$1)" 2>/dev/null
 }
 
 set_json() {
-    python3 << EOF
-import json
+    STATE_FILE="$STATE_FILE" python3 << EOF
+import json, fcntl, os
 from datetime import datetime, timezone
-with open('$STATE_FILE', 'r') as f:
-    d = json.load(f)
-$1
-d['last_heartbeat'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-with open('$STATE_FILE', 'w') as f:
-    json.dump(d, f, indent=2, ensure_ascii=False)
+sf = os.environ['STATE_FILE']
+with open(sf, 'r+') as f:
+    fcntl.flock(f, fcntl.LOCK_EX)
+    try:
+        d = json.load(f)
+        $1
+        d['last_heartbeat'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        f.seek(0)
+        f.truncate()
+        json.dump(d, f, indent=2, ensure_ascii=False)
+    finally:
+        fcntl.flock(f, fcntl.LOCK_UN)
 EOF
 }
 
-# 检测项目状态
+send_alert() {
+    local level="$1"
+    local message="$2"
+    log "ALERT [$level]: $message"
+    if [ -n "$ALERT_WEBHOOK" ]; then
+        curl -s -X POST "$ALERT_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\": \"[$level] adaptive-dev: $message\"}" > /dev/null 2>&1 || true
+    fi
+}
+
+cleanup_old_logs() {
+    find "$LOG_DIR" -name "session-*.log" -mtime +$LOG_RETENTION_DAYS -delete 2>/dev/null || true
+    find "$CHECKPOINT_DIR" -name "checkpoint-*.json" -mtime +$LOG_RETENTION_DAYS -delete 2>/dev/null || true
+    local count=$(ls -1 "$LOG_DIR"/session-*.log 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$count" -gt "$MAX_LOG_FILES" ]; then
+        ls -1t "$LOG_DIR"/session-*.log | tail -n +$((MAX_LOG_FILES + 1)) | while IFS= read -r f; do rm -f "$f"; done
+    fi
+    log "Cleaned old logs"
+}
+
+save_checkpoint() {
+    local ts=$(date +%Y%m%d_%H%M%S)
+    cp "$STATE_FILE" "$CHECKPOINT_DIR/checkpoint-$ts.json" 2>/dev/null
+    cp "$STATE_FILE" "$CHECKPOINT_DIR/latest.json" 2>/dev/null
+}
+
+git_auto_commit() {
+    [ "$GIT_AUTO_COMMIT" != "true" ] && return
+    [ ! -d "$PROJECT_DIR/.git" ] && return
+    local session_num=$(get_json "['sessions']['count']" 2>/dev/null || echo 0)
+    (
+        cd "$PROJECT_DIR"
+        git add -A -- ':!.dev-state' 2>/dev/null || true
+        if ! git diff --cached --quiet 2>/dev/null; then
+            git commit -m "auto: pre-session-${session_num} checkpoint" --no-verify 2>/dev/null || true
+        fi
+    )
+    log "Git checkpoint: pre-session-${session_num}"
+}
+
+git_rollback() {
+    [ "$GIT_ROLLBACK_ON_FAILURE" != "true" ] && return
+    [ ! -d "$PROJECT_DIR/.git" ] && return
+    (
+        cd "$PROJECT_DIR"
+        local last_commit=$(git log -1 --format="%s" 2>/dev/null)
+        if [[ "$last_commit" == auto:* ]]; then
+            git revert HEAD --no-edit --no-verify 2>/dev/null || true
+        fi
+    )
+    log "Git rollback: attempted revert"
+}
+
+
+# ============================================
+# 错误分类与智能恢复
+# ============================================
+
+classify_exit() {
+    local session_log="$1"
+    local exit_code="$2"
+    local duration="$3"
+
+    [ ! -f "$session_log" ] && { echo "unknown_crash"; return; }
+
+    # Session timeout (duration-based, check first as most reliable signal)
+    if [ "$duration" -ge "$SESSION_TIMEOUT" ] 2>/dev/null; then
+        echo "session_timeout"
+        return
+    fi
+
+    # Context exhaustion (Claude ran out of context window)
+    if grep -qi "context.*window\|context.*token.*limit\|conversation.*too.*long\|maximum.*context\|context.*length\|max.*tokens" "$session_log" 2>/dev/null; then
+        echo "context_exhausted"
+        return
+    fi
+
+    # Rate limit (already handled but classify for logging)
+    if grep -qi "rate.limit\|HTTP.*429\|status.*429\|too.many.requests" "$session_log" 2>/dev/null; then
+        echo "rate_limit"
+        return
+    fi
+
+    # Network / connection errors
+    if grep -qi "ECONNREFUSED\|ECONNRESET\|ETIMEDOUT\|network.*error\|connection.*refused\|connection.*reset\|fetch.*failed" "$session_log" 2>/dev/null; then
+        echo "network_error"
+        return
+    fi
+
+    # Permission / auth errors
+    if grep -qi "permission.*denied\|EACCES\|unauthorized\|HTTP.*401\|status.*401\|403.*forbidden\|invalid.*api.*key" "$session_log" 2>/dev/null; then
+        echo "permission_error"
+        return
+    fi
+
+    # Tool execution failures
+    if grep -qi "tool.*execution.*failed\|command.*not.*found\|spawn.*ENOENT" "$session_log" 2>/dev/null; then
+        echo "tool_error"
+        return
+    fi
+
+    echo "unknown_crash"
+}
+
+get_last_error_context() {
+    local session_log="$1"
+    [ ! -f "$session_log" ] && return
+    # Extract last 5 lines containing "error", "fail", "exception" (case insensitive)
+    grep -i "error\|fail\|exception\|traceback\|panic" "$session_log" 2>/dev/null | tail -5
+}
+
 detect_project_state() {
-    # 返回: running | has_state | has_docs | empty
-
-    # 1. 检查是否已在运行
     if [ -f "$PID_FILE" ] && ps -p "$(cat "$PID_FILE" 2>/dev/null)" &>/dev/null; then
-        echo "running"
-        return
+        echo "running"; return
     fi
-
-    # 2. 检查是否有状态文件
     if [ -f "$STATE_FILE" ]; then
-        echo "has_state"
-        return
+        echo "has_state"; return
     fi
-
-    # 3. 检查是否有项目文档
     if [ -d "docs/prd" ] && ls docs/prd/*.md &>/dev/null; then
-        echo "has_docs"
-        return
+        echo "has_docs"; return
     fi
-
-    if [ -f "PRD.md" ] || [ -f "requirements.md" ] || [ -f "README.md" ]; then
-        echo "has_docs"
-        return
-    fi
-
-    # 4. 检查是否有代码目录 (常见项目结构)
-    if [ -d "src" ] || [ -d "client" ] || [ -d "admin" ] || [ -d "app" ] || \
-       [ -d "backend" ] || [ -d "frontend" ] || [ -d "server" ] || [ -d "api" ] || \
-       [ -d "lib" ] || [ -d "packages" ] || [ -d "modules" ]; then
-        echo "has_docs"
-        return
-    fi
-
-    # 5. 检查是否有项目配置文件 (各种语言/框架)
-    if [ -f "package.json" ] || [ -f "pyproject.toml" ] || [ -f "requirements.txt" ] || \
-       [ -f "Cargo.toml" ] || [ -f "go.mod" ] || [ -f "pom.xml" ] || [ -f "build.gradle" ] || \
-       [ -f "Gemfile" ] || [ -f "composer.json" ] || [ -f "Makefile" ] || [ -f "CMakeLists.txt" ]; then
-        echo "has_docs"
-        return
-    fi
-
-    # 6. 检查是否有代码文件 (至少有一个)
-    if ls *.py *.js *.ts *.go *.rs *.java *.rb *.php *.c *.cpp *.h 2>/dev/null | head -1 &>/dev/null; then
-        echo "has_docs"
-        return
-    fi
-
+    for f in PRD.md requirements.md README.md; do
+        [ -f "$f" ] && { echo "has_docs"; return; }
+    done
+    for d in src client admin app backend frontend server api lib packages; do
+        [ -d "$d" ] && { echo "has_docs"; return; }
+    done
+    for f in package.json pyproject.toml requirements.txt Cargo.toml go.mod pom.xml Makefile; do
+        [ -f "$f" ] && { echo "has_docs"; return; }
+    done
     echo "empty"
 }
 
@@ -119,23 +222,17 @@ $SCRIPT_NAME v$VERSION - 自适应持续开发引擎
   $SCRIPT_NAME pause               暂停
   $SCRIPT_NAME status              查看状态
   $SCRIPT_NAME logs                实时日志
+  $SCRIPT_NAME health              运行健康度检查
+  $SCRIPT_NAME feedback "内容"     写入反馈
   $SCRIPT_NAME reset               重置
 
-自动判断逻辑:
-  - 已在运行 → 提示已运行
-  - 有状态文件 → 从断点继续
-  - 有项目文档 → 基于现有项目继续
-  - 空项目 → 需要传入需求描述
-
 示例:
-  # 空项目，从需求开始
   $SCRIPT_NAME start "一个待办事项App，支持增删改查"
-
-  # 已有项目或暂停后继续
-  $SCRIPT_NAME start
+  $SCRIPT_NAME start               # 已有项目或暂停后继续
 
 环境变量:
   CLAUDE_MODEL    使用的模型 (默认: claude-sonnet-4-20250514)
+  SKILL_DIR       Skill 目录路径
 
 EOF
 }
@@ -144,53 +241,36 @@ cmd_start() {
     local requirement="$1"
     local project_name="$(basename "$PROJECT_DIR")"
 
-    # 检查依赖
-    command -v python3 &>/dev/null || { echo "❌ 需要 python3"; exit 1; }
-    command -v claude &>/dev/null || { echo "❌ 需要 claude CLI"; exit 1; }
+    command -v python3 &>/dev/null || { echo "需要 python3"; exit 1; }
+    command -v claude &>/dev/null || { echo "需要 claude CLI"; exit 1; }
 
-    # 自动判断状态
     local state=$(detect_project_state)
-
     case "$state" in
         running)
-            local pid=$(cat "$PID_FILE")
-            echo "⚠️  已在运行 (PID: $pid)"
-            echo "   使用 '$SCRIPT_NAME status' 查看状态"
-            echo "   使用 '$SCRIPT_NAME stop' 停止"
+            echo "已在运行 (PID: $(cat "$PID_FILE"))"
+            echo "  $SCRIPT_NAME status  查看状态"
+            echo "  $SCRIPT_NAME stop    停止"
             exit 1
             ;;
-
         has_state)
-            echo "🔄 检测到断点，从上次继续..."
+            echo "检测到断点，从上次继续..."
             project_name=$(get_json "['project']['name']" 2>/dev/null || echo "$project_name")
-
-            # 如果是 paused 状态，自动恢复
             local current_status=$(get_json "['status']")
-            if [ "$current_status" = "paused" ]; then
-                echo "   (从暂停状态恢复)"
-                set_json "d['status']='continue'"
-            fi
-
+            [ "$current_status" = "paused" ] && set_json "d['status']='continue'"
             _do_start "$project_name"
             ;;
-
         has_docs)
-            echo "📂 检测到现有项目，基于现有内容继续..."
+            echo "检测到现有项目，基于现有内容继续..."
             _init_state "$project_name" ""
             _do_start "$project_name"
             ;;
-
         empty)
             if [ -z "$requirement" ]; then
-                echo "❌ 空项目需要提供需求描述"
-                echo ""
+                echo "空项目需要提供需求描述"
                 echo "用法: $SCRIPT_NAME start \"需求描述\""
-                echo ""
-                echo "示例:"
-                echo "  $SCRIPT_NAME start \"一个待办事项App，支持创建、完成、删除任务\""
                 exit 1
             fi
-            echo "🆕 新项目，从需求开始..."
+            echo "新项目，从需求开始..."
             _init_state "$project_name" "$requirement"
             _do_start "$project_name"
             ;;
@@ -200,138 +280,195 @@ cmd_start() {
 _init_state() {
     local name="$1"
     local requirement="$2"
-
-    mkdir -p "$PROJECT_DIR/$STATE_DIR"/{logs,checkpoints,locks}
-
+    mkdir -p "$PROJECT_DIR/$STATE_DIR"/{logs,checkpoints,agents}
     local ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    [ -n "$requirement" ] && echo "$requirement" > "$REQUIREMENT_FILE"
 
-    if [ -n "$requirement" ]; then
-        echo "$requirement" > "$REQUIREMENT_FILE"
-    fi
-
-    cat > "$STATE_FILE" << EOF
+    cat > "$STATE_FILE" << STATEEOF
 {
   "version": "$VERSION",
-  "project": {
-    "name": "$name",
-    "path": "$PROJECT_DIR",
-    "type": "unknown",
-    "created_at": "$ts"
-  },
-  "health": {
-    "score": 0,
-    "breakdown": {
-      "requirements": 0,
-      "code": 0,
-      "tests": 0,
-      "runnable": 0,
-      "quality": 0
-    },
-    "usable": false,
-    "target": 80,
-    "assessed_at": null,
-    "history": []
-  },
+  "project": {"name": "$(echo "$name" | sed 's/["\]/\\&/g')", "path": "$(echo "$PROJECT_DIR" | sed 's/["\]/\\&/g')", "type": "unknown", "created_at": "$ts"},
+  "health": {"score": 0, "breakdown": {"requirements": 0, "code": 0, "tests": 0, "runnable": 0, "quality": 0}, "details": {}, "usable": false, "target": 80, "assessed_at": null, "history": [], "delta": 0},
   "status": "ready",
   "exit_reason": null,
   "current_action": null,
-  "agent_coordination": {
-    "active_agents": [],
-    "completed_agents": [],
-    "pending_sync": false
-  },
+  "agent_coordination": {"active_agents": [], "completed_agents": [], "pending_sync": false},
   "action_history": [],
   "decision_log": [],
   "blockers": [],
   "errors": [],
-  "sessions": {
-    "count": 0,
-    "total_turns": 0,
-    "current_session": null
-  },
+  "sessions": {"count": 0, "total_turns": 0, "current_session": null},
   "last_heartbeat": "$ts",
-  "metrics": {
-    "total_duration_seconds": 0,
-    "avg_health_delta_per_session": 0,
-    "parallel_executions": 0
-  }
+  "metrics": {"total_duration_seconds": 0, "parallel_executions": 0, "avg_health_delta_per_session": 0}
 }
-EOF
+STATEEOF
+
+    # Run initial health check
+    if [ -f "$HEALTH_CHECK" ]; then
+        python3 "$HEALTH_CHECK" --project-dir "$PROJECT_DIR" --update 2>/dev/null
+    fi
 }
 
 _do_start() {
     local name="$1"
+    echo "启动自适应持续开发: $name"
+    echo "  项目: $PROJECT_DIR"
+    echo "  模型: $CLAUDE_MODEL"
 
-    echo "🚀 启动自适应持续开发: $name"
-    echo "   项目目录: $PROJECT_DIR"
-    echo "   模型: $CLAUDE_MODEL"
+    # Ensure required directories exist (may be missing in resume path)
+    mkdir -p "$LOG_DIR" "$CHECKPOINT_DIR"
 
-    # 启动守护进程
     _start_daemon &
     local pid=$!
     echo $pid > "$PID_FILE"
-
     sleep 2
+
     if ps -p $pid &>/dev/null; then
         echo ""
-        echo "✅ 已启动 (PID: $pid)"
-        echo ""
-        echo "常用命令:"
+        echo "已启动 (PID: $pid)"
         echo "  $SCRIPT_NAME status  查看状态"
         echo "  $SCRIPT_NAME logs    实时日志"
         echo "  $SCRIPT_NAME stop    停止"
     else
-        echo "❌ 启动失败"
+        echo "启动失败"
         tail -5 "$LOG_DIR/daemon.log" 2>/dev/null
         exit 1
     fi
 }
+
+# ============================================
+# 守护进程
+# ============================================
 
 _start_daemon() {
     exec >> "$LOG_DIR/daemon.log" 2>&1
 
     log "=========================================="
     log "守护进程启动 v$VERSION"
-    log "模型: $CLAUDE_MODEL"
+    log "模型: $CLAUDE_MODEL | 最大轮次: $MAX_TURNS"
     log "=========================================="
 
-    trap 'log "收到终止信号"; exit 0' SIGTERM SIGINT
+    _cleanup() {
+        log "收到终止信号"
+        save_checkpoint
+        # Kill claude: prefer process group (setsid), fallback to PID
+        local claude_pgid_file="$PROJECT_DIR/$STATE_DIR/claude.pgid"
+        local claude_pid_file="$PROJECT_DIR/$STATE_DIR/claude.pid"
+        if [ -f "$claude_pgid_file" ]; then
+            local pgid=$(cat "$claude_pgid_file")
+            if [ -n "$pgid" ] && [ "$pgid" -gt 0 ] 2>/dev/null; then
+                kill -- -$pgid 2>/dev/null
+            fi
+            rm -f "$claude_pgid_file"
+        elif [ -f "$claude_pid_file" ]; then
+            local cpid=$(cat "$claude_pid_file")
+            if [ -n "$cpid" ] && [ "$cpid" -gt 0 ] 2>/dev/null; then
+                kill "$cpid" 2>/dev/null
+            fi
+        fi
+        rm -f "$claude_pid_file"
+        # Kill any watchdog subprocesses
+        jobs -p | xargs kill 2>/dev/null
+        exit 0
+    }
+    trap '_cleanup' SIGTERM SIGINT
 
     local errors=0
     local rate_limit_count=0
+    local loop_count=0
 
     while true; do
+        loop_count=$((loop_count + 1))
+
+        # Log rotation every 50 loops
+        [ $((loop_count % 50)) -eq 0 ] && cleanup_old_logs
+
         [ ! -f "$STATE_FILE" ] && { log "ERROR: 状态文件丢失"; sleep 60; continue; }
 
         local status=$(get_json "['status']")
+        # Detect corrupted state.json (get_json returns empty)
+        if [ -z "$status" ]; then
+            local cp_latest="$CHECKPOINT_DIR/latest.json"
+            if [ -f "$cp_latest" ]; then
+                log "WARN: state.json 损坏，从 checkpoint 恢复"
+                cp "$cp_latest" "$STATE_FILE"
+                status=$(get_json "['status']")
+            fi
+            if [ -z "$status" ]; then
+                log "ERROR: state.json 损坏且无法恢复"
+                send_alert "ERROR" "state.json 损坏"
+                exit 1
+            fi
+        fi
         local health_score=$(get_json "['health']['score']" 2>/dev/null || echo 0)
+        local total_sessions=$(get_json "['sessions']['count']" 2>/dev/null || echo 0)
 
-        log "当前状态: $status, 健康度: $health_score"
+        log "状态: $status | 健康度: $health_score | 会话: $total_sessions"
+
+        # Session limit check
+        if [ "$MAX_TOTAL_SESSIONS" -gt 0 ] && [ "$total_sessions" -ge "$MAX_TOTAL_SESSIONS" ]; then
+            log "达到最大会话数 ($MAX_TOTAL_SESSIONS)，停止"
+            send_alert "WARN" "达到最大会话数限制"
+            exit 0
+        fi
 
         case "$status" in
             ready|continue)
+                # Handle rate limit from previous session
+                local exit_reason=$(get_json "['exit_reason']" 2>/dev/null || echo "")
+                if [ "$exit_reason" = "rate_limit" ]; then
+                    local wait=$(python3 -c "print(int(min($RATE_LIMIT_WAIT * ($RATE_LIMIT_BACKOFF ** $rate_limit_count), 1800)))" 2>/dev/null || echo $RATE_LIMIT_WAIT)
+                    rate_limit_count=$((rate_limit_count + 1))
+                    log "限流等待 ${wait}s (第 $rate_limit_count 次)"
+                    sleep $wait
+                fi
+
+                save_checkpoint
                 _run_session
                 local ret=$?
 
-                if [ $ret -eq 2 ]; then
-                    # 限流
-                    rate_limit_count=$((rate_limit_count + 1))
-                    local wait=$((RATE_LIMIT_WAIT * rate_limit_count))
-                    [ $wait -gt 1800 ] && wait=1800
-                    log "限流等待 ${wait}s (第 $rate_limit_count 次)"
-                    sleep $wait
-                elif [ $ret -ne 0 ]; then
-                    errors=$((errors + 1))
-                    [ $errors -ge $MAX_ERRORS ] && { log "ERROR: 连续错误过多"; exit 1; }
-                else
-                    errors=0
-                    rate_limit_count=0
-                fi
+                case $ret in
+                    0)  # Success
+                        errors=0
+                        rate_limit_count=0
+                        ;;
+                    2)  # Rate limit
+                        continue
+                        ;;
+                    3)  # Context exhausted - not a real error, restart with fresh context
+                        log "上下文恢复: 新会话将自动获得新上下文"
+                        ;;
+                    4)  # Network error - short wait, don't count as error
+                        log "网络恢复: 等待 30s 后重试"
+                        sleep 30
+                        ;;
+                    5)  # Permission error - count as error
+                        errors=$((errors + 1))
+                        if [ $errors -ge $MAX_ERRORS ]; then
+                            log "ERROR: 权限错误过多，需要人工介入"
+                            send_alert "ERROR" "权限错误过多，已停止"
+                            exit 1
+                        fi
+                        ;;
+                    6)  # Session timeout - not a real error, just restart
+                        log "会话超时恢复: 自动重启"
+                        ;;
+                    *)  # Unknown error
+                        errors=$((errors + 1))
+                        if [ $errors -ge $MAX_ERRORS ]; then
+                            log "ERROR: 连续错误过多 ($errors)"
+                            send_alert "ERROR" "连续错误过多，已停止"
+                            exit 1
+                        fi
+                        git_rollback
+                        ;;
+                esac
 
-                # 检查是否完成
+                # Check completion
                 local new_status=$(get_json "['status']")
                 if [ "$new_status" = "completed" ]; then
-                    log "🎉 项目达到可用状态！"
+                    log "项目达到可用状态!"
+                    send_alert "INFO" "项目完成! 健康度: $(get_json "['health']['score']")"
                     exit 0
                 fi
 
@@ -341,12 +478,46 @@ _start_daemon() {
                 ;;
 
             running)
-                # 检查心跳超时
-                if _check_heartbeat_timeout; then
-                    log "心跳超时，强制重启"
-                    set_json "d['status']='continue'; d['exit_reason']='heartbeat_timeout'"
-                    pkill -f "claude.*--max-turns" 2>/dev/null
-                    sleep 5
+                local last_hb=$(get_json "['last_heartbeat']" 2>/dev/null)
+                if [ -n "$last_hb" ]; then
+                    # Validate ISO 8601 format to prevent Python injection
+                    if [[ ! "$last_hb" =~ ^[0-9T:.Z+/-]+$ ]]; then
+                        last_hb=""
+                    fi
+                    local age=$(LAST_HB="$last_hb" python3 -c "
+import os
+from datetime import datetime, timezone
+try:
+    hb_str = os.environ.get('LAST_HB', '')
+    if not hb_str:
+        print(99999)
+    else:
+        hb = datetime.fromisoformat(hb_str.replace('Z', '+00:00'))
+        print(int((datetime.now(timezone.utc) - hb).total_seconds()))
+except:
+    print(99999)
+" 2>/dev/null || echo 99999)
+                    if [ "$age" -gt "$HEARTBEAT_TIMEOUT" ]; then
+                        log "心跳超时 (${age}s > ${HEARTBEAT_TIMEOUT}s)"
+                        set_json "d['status']='continue'; d['exit_reason']='heartbeat_timeout'"
+                        # Kill claude: prefer process group (setsid), fallback to PID
+                        local claude_pgid_file="$PROJECT_DIR/$STATE_DIR/claude.pgid"
+                        local claude_pid_file="$PROJECT_DIR/$STATE_DIR/claude.pid"
+                        if [ -f "$claude_pgid_file" ]; then
+                            local pgid=$(cat "$claude_pgid_file")
+                            if [ -n "$pgid" ] && [ "$pgid" -gt 0 ] 2>/dev/null; then
+                                kill -- -$pgid 2>/dev/null
+                            fi
+                            rm -f "$claude_pgid_file"
+                        elif [ -f "$claude_pid_file" ]; then
+                            local cpid=$(cat "$claude_pid_file")
+                            if [ -n "$cpid" ] && [ "$cpid" -gt 0 ] 2>/dev/null; then
+                                kill "$cpid" 2>/dev/null
+                            fi
+                        fi
+                        rm -f "$claude_pid_file"
+                        sleep 5
+                    fi
                 fi
                 sleep 30
                 ;;
@@ -357,7 +528,7 @@ _start_daemon() {
                 ;;
 
             completed)
-                log "🎉 项目完成！"
+                log "项目完成!"
                 exit 0
                 ;;
 
@@ -370,219 +541,382 @@ _start_daemon() {
 }
 
 _run_session() {
-    local health_score=$(get_json "['health']['score']" 2>/dev/null || echo 0)
     local session_count=$(get_json "['sessions']['count']" 2>/dev/null || echo 0)
+
+    # === P0-1: Independent health check BEFORE session ===
+    log "Pre-session health check..."
+    local health_json=""
+    if [ -f "$HEALTH_CHECK" ]; then
+        health_json=$(python3 "$HEALTH_CHECK" --project-dir "$PROJECT_DIR" --update --json 2>/dev/null)
+    fi
+    local health_score=$(echo "$health_json" | python3 -c "import sys,json; print(json.load(sys.stdin)['score'])" 2>/dev/null || get_json "['health']['score']" 2>/dev/null || echo 0)
+
+    if [ "$health_score" -ge 80 ]; then
+        log "Health $health_score >= 80, project usable!"
+        set_json "d['status']='completed'; d['exit_reason']='usable_reached'"
+        return 0
+    fi
 
     log "启动会话 #$((session_count + 1)) - 健康度: $health_score"
 
-    # 更新状态
+    # === P1-6: Git checkpoint ===
+    git_auto_commit
+
     set_json "d['status']='running'; d['sessions']['count']=d['sessions'].get('count',0)+1"
 
-    # 读取需求
     local requirement=""
     [ -f "$REQUIREMENT_FILE" ] && requirement=$(cat "$REQUIREMENT_FILE")
 
-    # 构建 prompt
-    local prompt="你正在自适应持续开发模式下工作。
+    # === P3: Check user feedback ===
+    local user_feedback=""
+    local feedback_file="$PROJECT_DIR/$STATE_DIR/user-feedback.md"
+    if [ -f "$feedback_file" ]; then
+        user_feedback=$(cat "$feedback_file")
+    fi
 
-## 工作规范
-请先读取 skill 文档了解工作流程:
-cat $SKILL_DIR/SKILL.md
+    # === P0-2: Build prompt with FULL CONTEXT ===
+    local context_info
+    context_info=$(STATE_FILE="$STATE_FILE" python3 << 'PYEOF'
+import json, sys, os
+try:
+    with open(os.environ['STATE_FILE']) as f:
+        s = json.load(f)
+    parts = []
 
-## 项目信息
-- 项目名称: $(get_json "['project']['name']")
-- 项目目录: $PROJECT_DIR
-- 当前健康度: $health_score/100
-- 目标健康度: 80/100
+    ca = s.get('current_action') or {}
+    cp = ca.get('checkpoint')
+    if cp:
+        parts.append("## Checkpoint (resume from here)")
+        parts.append(f"- Step: {cp.get('step', 'N/A')}")
+        parts.append(f"- Progress: {cp.get('progress', 'N/A')}")
+        parts.append(f"- Next: {cp.get('next_action', 'N/A')}")
+        if cp.get('context'):
+            parts.append(f"- Context: {cp['context']}")
 
-## 执行步骤
-1. 执行项目健康度分析（SKILL.md 中的 Step 1）
-2. 计算健康度评分（Step 2）
-3. 根据健康度智能决策下一步行动（Step 3）
-4. 调度合适的 Agent 执行（Step 4）
-5. 更新状态文件
+    h = s.get('health', {})
+    bd = h.get('breakdown', {})
+    details = h.get('details', {})
+    max_s = {'requirements': 20, 'code': 25, 'tests': 20, 'runnable': 20, 'quality': 15}
+    parts.append(f"\n## Health Breakdown ({h.get('score', 0)}/100)")
+    for dim in ['requirements', 'code', 'tests', 'runnable', 'quality']:
+        d = details.get(dim, '')
+        parts.append(f"- {dim}: {bd.get(dim, 0)}/{max_s[dim]} ({d})")
 
-## 备用需求描述（仅当项目完全为空时使用）
-$requirement
+    # Find weakest dimension
+    if bd:
+        ratios = {k: bd.get(k, 0) / max_s[k] for k in max_s}
+        weakest = min(ratios, key=ratios.get)
+        parts.append(f"\n**Weakest dimension: {weakest} ({bd.get(weakest, 0)}/{max_s[weakest]})**")
 
-## 重要规则
-1. 每次会话先分析健康度
-2. 优先使用并行调度提高效率
-3. 健康度 >= 80 即可用，不要过度优化
-4. 每完成一步更新 .dev-state/state.json
-5. 接近轮次限制时保存断点退出
+    ah = s.get('action_history', [])
+    if ah:
+        parts.append(f"\n## Recent Actions")
+        for a in ah[-5:]:
+            parts.append(f"- [{a.get('completed_at', '?')}] {a.get('type', '?')}: {a.get('result', '?')}")
 
-请开始执行。"
+    blockers = s.get('blockers', [])
+    if blockers:
+        parts.append(f"\n## Blockers ({len(blockers)})")
+        for b in blockers[-3:]:
+            parts.append(f"- {b}")
+
+    errors = s.get('errors', [])
+    if errors:
+        parts.append(f"\n## Recent Errors")
+        for e in errors[-3:]:
+            parts.append(f"- [{e.get('timestamp', '?')}] {e.get('message', e.get('type', '?'))}")
+
+    print('\n'.join(parts))
+except Exception as e:
+    print(f"(Context read error: {e})")
+PYEOF
+)
+
+    local prompt="You are in adaptive continuous development mode.
+
+## Skill Documentation
+Read the skill doc first: cat $SKILL_DIR/SKILL.md
+
+## Project Info
+- Name: $(get_json "['project']['name']")
+- Directory: $PROJECT_DIR
+- Health: $health_score/100 (assessed by independent script, DO NOT re-score)
+- Target: 80/100
+- Session: #$((session_count + 1))
+- Max turns: $MAX_TURNS (save checkpoint by turn $((MAX_TURNS - 5)))
+
+## Session Context
+$context_info
+
+## Previous Errors
+$(STATE_FILE="$STATE_FILE" python3 -c "
+import json, os
+try:
+    with open(os.environ['STATE_FILE']) as f:
+        s = json.load(f)
+    errs = s.get('errors', [])
+    if errs:
+        last = errs[-1]
+        print(f'Last error: [{last.get(\"type\",\"?\")}] {last.get(\"message\",\"\")}')
+        if last.get('type') == 'context_exhausted':
+            print('Recovery: Context was exhausted last session. Work efficiently, use /compact if needed.')
+        elif last.get('type') == 'tool_error':
+            print('Recovery: A tool failed last session. Try alternative approach or skip.')
+        elif last.get('type') == 'network_error':
+            print('Recovery: Network issue last session. Should be resolved now.')
+    else:
+        print('(none)')
+except Exception:
+    print('(none)')
+" 2>/dev/null)
+
+## Requirement (for empty projects only)
+$requirement"
+
+    # Append user feedback if exists
+    if [ -n "$user_feedback" ]; then
+        prompt="$prompt
+
+## User Feedback (IMPORTANT - address this)
+$user_feedback"
+    fi
+
+    prompt="$prompt
+
+## Rules
+1. Health is ALREADY computed - trust the score above, focus on weakest dimension
+2. Read SKILL.md for decision rules and Agent dispatch
+3. Update .dev-state/state.json after each major step
+4. Save checkpoint by turn $((MAX_TURNS - 5)) and exit gracefully
+5. Do NOT use pkill for cleanup
+6. If context gets long (many tool calls), use /compact to free space before running out
+7. If a tool/command fails repeatedly (3+ times), record as blocker and move on
+8. Before exiting, always ensure checkpoint is saved for next session recovery
+
+Begin."
 
     local session_log="$LOG_DIR/session-$(date +%Y%m%d_%H%M%S).log"
     local start_time=$(date +%s)
+    log "Session log: $session_log"
 
-    log "会话日志: $session_log"
+    # === P1-5: Process group isolation (setsid on Linux, direct on macOS) ===
+    local setsid_cmd=""
+    if command -v setsid &>/dev/null; then
+        setsid_cmd="setsid"
+    fi
 
-    # 启动 claude
-    claude --print --dangerously-skip-permissions --max-turns $MAX_TURNS --model "$CLAUDE_MODEL" "$prompt" > "$session_log" 2>&1 &
+    # Write prompt to temp file and pipe to claude (avoids ARG_MAX limit)
+    local prompt_file="$PROJECT_DIR/$STATE_DIR/session-prompt.txt"
+    printf '%s' "$prompt" > "$prompt_file"
+    $setsid_cmd bash -c "cat '$prompt_file' | claude --print --dangerously-skip-permissions \
+        --max-turns $MAX_TURNS --model '$CLAUDE_MODEL'" > "$session_log" 2>&1 &
     local claude_pid=$!
 
-    # 超时监控
+    # Save PGID only when setsid creates a new process group (safe to kill)
+    # On macOS without setsid, PGID == daemon's own group - must NOT kill it
+    local claude_pgid=""
+    if [ -n "$setsid_cmd" ]; then
+        claude_pgid=$(ps -o pgid= -p $claude_pid 2>/dev/null | tr -d ' ')
+        [ -n "$claude_pgid" ] && echo "$claude_pgid" > "$PROJECT_DIR/$STATE_DIR/claude.pgid"
+    fi
+    # Always save PID for fallback cleanup
+    echo "$claude_pid" > "$PROJECT_DIR/$STATE_DIR/claude.pid"
+
+    # Timeout watchdog using process group (or PID fallback)
     (
         sleep $SESSION_TIMEOUT
         if kill -0 $claude_pid 2>/dev/null; then
-            kill -TERM $claude_pid 2>/dev/null
-            sleep 5
-            kill -9 $claude_pid 2>/dev/null
+            if [ -n "$claude_pgid" ]; then
+                kill -- -$claude_pgid 2>/dev/null
+                sleep 5
+                kill -9 -- -$claude_pgid 2>/dev/null
+            else
+                kill $claude_pid 2>/dev/null
+                sleep 5
+                kill -9 $claude_pid 2>/dev/null
+            fi
         fi
     ) &
     local watchdog_pid=$!
 
-    # 等待完成
     wait $claude_pid
     local code=$?
 
-    # 清理 watchdog
     kill $watchdog_pid 2>/dev/null
     wait $watchdog_pid 2>/dev/null
+    rm -f "$PROJECT_DIR/$STATE_DIR/claude.pgid" "$PROJECT_DIR/$STATE_DIR/claude.pid"
 
     local end_time=$(date +%s)
     local duration=$((end_time - start_time))
 
+    # === P0-1: Independent health check AFTER session ===
+    log "Post-session health check..."
+    if [ -f "$HEALTH_CHECK" ]; then
+        python3 "$HEALTH_CHECK" --project-dir "$PROJECT_DIR" --update 2>/dev/null
+    fi
+    local new_health=$(get_json "['health']['score']" 2>/dev/null || echo 0)
+
     if [ $code -eq 0 ]; then
-        log "会话结束 (耗时: ${duration}s)"
+        log "会话结束 (${duration}s) 健康度: $health_score -> $new_health"
         local current_status=$(get_json "['status']")
         [ "$current_status" = "running" ] && set_json "d['status']='continue'"
         return 0
     fi
 
-    # 检查超时
-    if [ $duration -ge $SESSION_TIMEOUT ]; then
-        log "会话超时 (${duration}s >= ${SESSION_TIMEOUT}s)"
-        set_json "d['status']='continue'; d['exit_reason']='session_timeout'"
-        return 1
-    fi
+    # Classify exit reason (session_timeout is handled by classify_exit)
+    local error_type=$(classify_exit "$session_log" "$code" "$duration")
+    local error_context=$(get_last_error_context "$session_log")
+    log "会话退出 (code: $code, ${duration}s, type: $error_type) 健康度: $health_score -> $new_health"
 
-    log "会话退出 (code: $code, 耗时: ${duration}s)"
-    set_json "d['status']='continue'"
+    # Record error in state with sanitized context
+    local safe_ctx=$(echo "$error_context" | head -3 | tr '\n' ' ' | tr '\\' ' ' | tr "'" " " | tr '"' " " | tr '$' ' ' | cut -c1-200)
+    set_json "
+d['status']='continue'
+d['exit_reason']='$error_type'
+d.setdefault('errors', []).append({'type': '$error_type', 'timestamp': d['last_heartbeat'], 'message': '$safe_ctx'.strip(), 'session': d['sessions'].get('count',0)})
+d['errors'] = d['errors'][-10:]
+"
 
-    # 检查限流
-    if grep -qi "rate.limit\|429\|too.many.requests" "$session_log" 2>/dev/null; then
-        log "检测到限流"
-        return 2
-    fi
-
-    return $code
+    case "$error_type" in
+        rate_limit)
+            log "检测到限流"
+            return 2
+            ;;
+        context_exhausted)
+            log "上下文耗尽，下次会话将以新上下文重启"
+            return 3
+            ;;
+        network_error)
+            log "网络错误，短暂等待后重试"
+            return 4
+            ;;
+        permission_error)
+            log "权限错误，需要人工介入"
+            send_alert "ERROR" "权限错误"
+            return 5
+            ;;
+        session_timeout)
+            log "会话超时，自动重启"
+            return 6
+            ;;
+        *)
+            return 99
+            ;;
+    esac
 }
 
-_check_heartbeat_timeout() {
-    local last_hb=$(get_json "['last_heartbeat']" 2>/dev/null)
-    [ -z "$last_hb" ] && return 1
-
-    local age=$(python3 -c "
-from datetime import datetime, timezone
-try:
-    hb_str = '$last_hb'.replace('Z', '+00:00')
-    hb = datetime.fromisoformat(hb_str)
-    now = datetime.now(timezone.utc)
-    print(int((now - hb).total_seconds()))
-except:
-    print(99999)
-" 2>/dev/null || echo 99999)
-
-    [ "$age" -gt "$HEARTBEAT_TIMEOUT" ]
-}
+# ============================================
+# 其他命令
+# ============================================
 
 cmd_stop() {
-    [ ! -f "$PID_FILE" ] && { echo "⚠️  未运行"; return; }
+    [ ! -f "$PID_FILE" ] && { echo "未运行"; return; }
     local pid=$(cat "$PID_FILE")
+    # Kill claude: prefer process group (setsid), fallback to PID
+    local claude_pgid_file="$PROJECT_DIR/$STATE_DIR/claude.pgid"
+    local claude_pid_file="$PROJECT_DIR/$STATE_DIR/claude.pid"
+    if [ -f "$claude_pgid_file" ]; then
+        local pgid=$(cat "$claude_pgid_file")
+        if [ -n "$pgid" ] && [ "$pgid" -gt 0 ] 2>/dev/null; then
+            kill -- -$pgid 2>/dev/null
+            sleep 1
+            kill -9 -- -$pgid 2>/dev/null
+        fi
+        rm -f "$claude_pgid_file"
+    elif [ -f "$claude_pid_file" ]; then
+        local cpid=$(cat "$claude_pid_file")
+        if [ -n "$cpid" ] && [ "$cpid" -gt 0 ] 2>/dev/null; then
+            kill "$cpid" 2>/dev/null
+            sleep 1
+            kill -9 "$cpid" 2>/dev/null
+        fi
+    fi
+    rm -f "$claude_pid_file"
+    # Save state before stopping
+    if [ -f "$STATE_FILE" ]; then
+        save_checkpoint
+        set_json "d['status']='paused'; d['exit_reason']='user_stop'"
+    fi
+    # Kill daemon
     kill "$pid" 2>/dev/null
     sleep 2
     kill -9 "$pid" 2>/dev/null
     rm -f "$PID_FILE"
-    echo "✅ 已停止"
+    echo "已停止"
 }
 
 cmd_pause() {
-    [ ! -f "$STATE_FILE" ] && { echo "❌ 未初始化"; exit 1; }
-    [ ! -f "$PID_FILE" ] && { echo "⚠️  未运行"; return; }
-
+    [ ! -f "$STATE_FILE" ] && { echo "未初始化"; exit 1; }
+    [ ! -f "$PID_FILE" ] && { echo "未运行"; return; }
     set_json "d['status']='paused'; d['exit_reason']='user_pause'"
-    echo "⏸️  已暂停（完成当前会话后生效）"
-    echo "   使用 '$SCRIPT_NAME start' 恢复"
+    echo "已暂停（完成当前会话后生效）"
+    echo "  $SCRIPT_NAME start 恢复"
+}
+
+cmd_health() {
+    if [ -f "$HEALTH_CHECK" ]; then
+        python3 "$HEALTH_CHECK" --project-dir "$PROJECT_DIR" "$@"
+    else
+        echo "health-check.py not found at $HEALTH_CHECK"
+        exit 1
+    fi
+}
+
+cmd_feedback() {
+    local feedback="$1"
+    if [ -z "$feedback" ]; then
+        echo "用法: $SCRIPT_NAME feedback \"反馈内容\""
+        exit 1
+    fi
+    mkdir -p "$PROJECT_DIR/$STATE_DIR"
+    local feedback_file="$PROJECT_DIR/$STATE_DIR/user-feedback.md"
+    echo "$(date '+%Y-%m-%d %H:%M:%S'): $feedback" >> "$feedback_file"
+    echo "反馈已记录，下次会话将读取"
 }
 
 cmd_status() {
     echo "=========================================="
-    echo "📊 自适应持续开发状态"
+    echo "自适应持续开发状态"
     echo "=========================================="
 
     local state=$(detect_project_state)
-
     case "$state" in
-        running)
-            local pid=$(cat "$PID_FILE")
-            echo "守护进程: ✅ 运行中 (PID: $pid)"
-            ;;
-        has_state)
-            echo "守护进程: ⏹️  未运行 (有断点可继续)"
-            ;;
-        has_docs)
-            echo "守护进程: ⏹️  未运行 (检测到项目文档)"
-            ;;
-        empty)
-            echo "守护进程: ⏹️  未运行 (空项目)"
-            ;;
+        running)  echo "守护进程: 运行中 (PID: $(cat "$PID_FILE"))" ;;
+        has_state) echo "守护进程: 未运行 (有断点)" ;;
+        has_docs) echo "守护进程: 未运行 (有项目)" ;;
+        empty)    echo "守护进程: 未运行 (空项目)" ;;
     esac
 
-    [ ! -f "$STATE_FILE" ] && { echo ""; echo "使用 '$SCRIPT_NAME start' 开始"; return; }
+    [ ! -f "$STATE_FILE" ] && { echo ""; echo "$SCRIPT_NAME start 开始"; return; }
+
+    # Run live health check if available
+    if [ -f "$HEALTH_CHECK" ]; then
+        echo ""
+        python3 "$HEALTH_CHECK" --project-dir "$PROJECT_DIR"
+    fi
 
     echo ""
-    python3 << 'EOF'
-import json
-from datetime import datetime
-
-with open('.dev-state/state.json') as f:
+    STATE_FILE="$STATE_FILE" python3 << 'PYEOF'
+import json, os
+with open(os.environ['STATE_FILE']) as f:
     s = json.load(f)
-
 print(f"项目: {s['project']['name']}")
 print(f"状态: {s['status']}")
-
-# 健康度
-h = s.get('health', {})
-print(f"\n健康度: {h.get('score', 0)}/100 {'✅ 可用' if h.get('usable') else '🔄 开发中'}")
-if h.get('breakdown'):
-    b = h['breakdown']
-    print(f"  需求: {b.get('requirements', 0)}/20")
-    print(f"  代码: {b.get('code', 0)}/25")
-    print(f"  测试: {b.get('tests', 0)}/20")
-    print(f"  运行: {b.get('runnable', 0)}/20")
-    print(f"  质量: {b.get('quality', 0)}/15")
-
-# 会话
-print(f"\n会话: {s['sessions'].get('count', 0)} 次")
-
-# 当前行动
-if s.get('current_action'):
-    ca = s['current_action']
-    print(f"当前行动: {ca.get('type', 'N/A')}")
-    if ca.get('agents'):
-        print(f"  Agent: {', '.join(ca['agents'])}")
-
-# 心跳
-hb = s.get('last_heartbeat')
-if hb:
-    try:
-        from datetime import timezone
-        hb_str = hb.replace('Z', '+00:00')
-        hb_time = datetime.fromisoformat(hb_str)
-        now = datetime.now(timezone.utc)
-        age = int((now - hb_time).total_seconds())
-        print(f"\n心跳: {age}s 前")
-    except:
-        pass
-
-# 错误
+print(f"会话: {s['sessions'].get('count', 0)} 次")
+ca = s.get('current_action')
+if ca:
+    print(f"当前: {ca.get('type', 'N/A')}")
+ah = s.get('action_history', [])
+if ah:
+    last = ah[-1]
+    print(f"上次: {last.get('type', '?')} -> {last.get('result', '?')}")
 errors = s.get('errors', [])
 if errors:
-    print(f"\n错误: {len(errors)} 个")
-EOF
+    print(f"错误: {len(errors)} 个")
+blockers = s.get('blockers', [])
+if blockers:
+    print(f"阻塞: {len(blockers)} 个")
+PYEOF
 
     echo ""
     echo "最近日志:"
@@ -590,15 +924,15 @@ EOF
 }
 
 cmd_logs() {
-    [ ! -f "$LOG_DIR/daemon.log" ] && { echo "❌ 无日志"; exit 1; }
-    echo "📜 实时日志 (Ctrl+C 退出)"
+    [ ! -f "$LOG_DIR/daemon.log" ] && { echo "无日志"; exit 1; }
+    echo "实时日志 (Ctrl+C 退出)"
     tail -f "$LOG_DIR/daemon.log"
 }
 
 cmd_reset() {
     cmd_stop 2>/dev/null
     rm -rf "$PROJECT_DIR/$STATE_DIR"
-    echo "✅ 已重置"
+    echo "已重置"
 }
 
 # ============================================
@@ -606,12 +940,14 @@ cmd_reset() {
 # ============================================
 
 case "${1:-help}" in
-    start)   cmd_start "$2" ;;
-    stop)    cmd_stop ;;
-    pause)   cmd_pause ;;
-    status)  cmd_status ;;
-    logs)    cmd_logs ;;
-    reset)   cmd_reset ;;
+    start)    cmd_start "$2" ;;
+    stop)     cmd_stop ;;
+    pause)    cmd_pause ;;
+    status)   cmd_status ;;
+    logs)     cmd_logs ;;
+    health)   shift; cmd_health "$@" ;;
+    feedback) cmd_feedback "$2" ;;
+    reset)    cmd_reset ;;
     help|-h|--help) cmd_help ;;
-    *)       echo "❌ 未知命令: $1"; cmd_help; exit 1 ;;
+    *)        echo "未知命令: $1"; cmd_help; exit 1 ;;
 esac

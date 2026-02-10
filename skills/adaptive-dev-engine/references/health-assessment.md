@@ -1,5 +1,7 @@
 # 项目健康度评估指南
 
+> **v2.0 注意**: 健康度评估现由独立脚本 `scripts/health-check.py` 自动执行，AI 不再自行评估。以下内容作为评分标准参考。
+
 ## 评估维度详解
 
 ### 1. 需求清晰度 (0-20分)
@@ -31,12 +33,13 @@ def score_requirements():
     prd_count = count_files('docs/prd/*.md')
     has_prd = file_exists('PRD.md')
     has_readme = file_exists('README.md')
+    has_req = file_exists('requirements.md')
 
     if prd_count >= 4:
         return 20  # 完整 PRD
     elif prd_count >= 2 or has_prd:
         return 15  # 基本清晰
-    elif prd_count >= 1 or has_readme:
+    elif prd_count >= 1 or has_req:
         return 10  # 有描述
     elif has_readme:
         return 5   # 仅 README
@@ -75,20 +78,18 @@ grep -r "@app\.\|@router\.\|@api\." src/ 2>/dev/null | wc -l
 **评分逻辑:**
 ```python
 def score_code():
-    total_files = count_py() + count_ts() + count_js()
-    has_routes = dir_exists('src/routes') or dir_exists('app/routes')
-    has_models = dir_exists('src/models') or dir_exists('app/models')
-    api_count = count_api_endpoints()
+    code_count = count_code_files()  # .py/.ts/.tsx/.js/.jsx/.go/.rs/.java/.rb/.php
+    api_count = grep_api_endpoints()  # @(app|router|api). in src/app/backend
 
-    if total_files >= 50 and api_count >= 10:
+    if code_count >= 50 and api_count >= 5:
         return 25  # 功能完整
-    elif total_files >= 30 and api_count >= 5:
+    elif code_count >= 30:
         return 20  # 基本完整
-    elif total_files >= 15 and has_routes:
+    elif code_count >= 15:
         return 15  # 部分功能
-    elif total_files >= 5:
+    elif code_count >= 5:
         return 10  # 骨架代码
-    elif total_files >= 1:
+    elif code_count >= 1:
         return 5   # 有代码
     else:
         return 0   # 无代码
@@ -122,21 +123,20 @@ pytest --cov=src --cov-report=term-missing 2>/dev/null | grep TOTAL
 ```python
 def score_tests():
     test_count = count_test_files()
-    code_count = count_code_files()
+    pytest_ok = try_pytest_collect()
 
-    if test_count == 0:
-        return 0
-
-    ratio = test_count / max(code_count, 1)
-
-    if ratio >= 0.5 and test_count >= 10:
-        return 20  # 测试充分
-    elif ratio >= 0.3 and test_count >= 5:
-        return 15  # 基础测试
+    if test_count >= 10 and pytest_ok:
+        return 20  # 测试充分，pytest 可收集
+    elif test_count >= 10:
+        return 15  # 测试文件多
+    elif test_count >= 5:
+        return 12  # 基础测试
     elif test_count >= 2:
-        return 10  # 少量测试
-    else:
+        return 8   # 少量测试
+    elif test_count >= 1:
         return 5   # 有测试
+    else:
+        return 0   # 无测试
 ```
 
 ---
@@ -166,7 +166,7 @@ if [ -f "start.sh" ]; then
     timeout 30 ./start.sh &
     sleep 10
     curl -s http://localhost:8000/health && echo "✓ 健康检查通过"
-    pkill -f "uvicorn\|npm"
+    # 进程清理由 health-check.py 的 _try_start() 使用进程组隔离自动处理
 fi
 ```
 
@@ -224,26 +224,30 @@ fi
 **评分逻辑:**
 ```python
 def score_quality():
-    lint_errors = run_linter()
-    complexity = check_complexity()
+    lint_errors = run_linter()  # ruff (Python) 或 eslint (JS/TS)
 
-    if lint_errors == 0 and complexity < 10:
-        return 15  # 质量好
-    elif lint_errors < 10:
-        return 10  # 质量一般
-    elif lint_errors < 50:
-        return 5   # 有问题
+    if lint_errors == 0:
+        return 15  # 无 lint 错误
+    elif 0 < lint_errors < 10:
+        return 10  # 少量问题
+    elif lint_errors >= 10:
+        return 5   # 问题较多
     else:
-        return 0   # 质量差
+        return 6   # Linter 不可用，默认分
 ```
 
 ---
 
-## 自动评估脚本
+## 自动评估脚本（已由 health-check.py 替代）
+
+> **注意:** 健康度评估现由 `scripts/health-check.py` 独立执行，守护进程在每次会话前后自动运行 `health-check.py --update`。AI **不应**手动执行健康度评估或调用以下函数。
+
+<details>
+<summary>旧版评估脚本（仅供历史参考，请勿使用）</summary>
 
 ```python
 #!/usr/bin/env python3
-"""项目健康度自动评估"""
+"""项目健康度自动评估（已废弃，由 health-check.py 替代）"""
 
 import os
 import subprocess
@@ -335,7 +339,7 @@ def assess_health():
 
     return {
         "breakdown": score,
-        "total": total,
+        "score": total,
         "usable": total >= 80,
         "assessed_at": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
     }
@@ -349,7 +353,7 @@ def save_health_to_state(health):
             state = json.load(f)
     else:
         state = {
-            "version": "1.0.0",
+            "version": "2.0.0",
             "project": {"name": Path.cwd().name, "path": str(Path.cwd())},
             "status": "ready",
             "sessions": {"count": 0},
@@ -357,7 +361,7 @@ def save_health_to_state(health):
         }
 
     state['health'] = {
-        'score': health['total'],
+        'score': health['score'],
         'breakdown': health['breakdown'],
         'usable': health['usable'],
         'assessed_at': health['assessed_at']
@@ -381,19 +385,22 @@ if __name__ == "__main__":
     print(f"可运行性:   {health['breakdown']['runnable']}/20")
     print(f"代码质量:   {health['breakdown']['quality']}/15")
     print(f"{'='*50}")
-    print(f"总分: {health['total']}/100")
-    print(f"可用状态: {'✅ 是' if health['usable'] else '❌ 否'}")
+    print(f"总分: {health['score']}/100")
+    print(f"可用状态: {'是' if health['usable'] else '否'}")
     print(f"{'='*50}")
 
     save_health_to_state(health)
     print("\n已保存到 .dev-state/state.json")
 ```
 
+</details>
+```
+
 ---
 
 ## 健康度提升策略
 
-### 从 0-20 提升到 40
+### 从 0-20 提升到 40（维度优先策略）
 
 **重点:** 建立需求和基础代码
 
