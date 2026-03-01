@@ -1,0 +1,47 @@
+# Batch Dev Pipeline - Ideas Input
+# 批量 Idea → 软件 流水线输入文件
+#
+# Usage:
+#   python3 batch-orchestrator.py start ideas.yaml --workspace ./workspace
+#
+# Schema:
+#   version: "1.0"
+#   defaults: 全局默认配置（可被每个 idea 覆盖）
+#   ideas: idea 列表，按 priority 排序执行
+
+version: "1.0"
+
+defaults:
+  max_sessions: 50              # 每个项目最大 session 数
+  target_health: 80             # 健康分数目标（达到即完成）
+  claude_model: "claude-sonnet-4-20250514"
+
+ideas:
+  - id: "todo-app"
+    name: "待办事项 App"
+    requirement: |
+      一个待办事项应用，支持增删改查、任务分类、截止日期设置。
+      技术栈：FastAPI 后端 + SQLite 数据库 + 简单 HTML 前端。
+      需要完整的 CRUD API 和基本的前端交互界面。
+    priority: 1
+    tags: ["fullstack", "crud"]
+    max_sessions: 30
+
+  - id: "calculator-api"
+    name: "计算器 API"
+    requirement: |
+      一个 REST API 计算器服务，支持加减乘除四则运算。
+      技术栈：FastAPI + 输入验证 + 错误处理。
+      POST /calculate 接收 {operation, a, b} 返回计算结果。
+    priority: 2
+    tags: ["backend", "api"]
+
+  - id: "weather-dashboard"
+    name: "天气仪表盘"
+    requirement: |
+      一个天气信息展示仪表盘，支持城市搜索、当前天气显示、
+      未来 3 天预报。使用模拟数据（不依赖外部 API）。
+      技术栈：FastAPI 后端 + React 前端 + SQLite 缓存。
+    priority: 3
+    tags: ["fullstack", "dashboard"]
+    max_sessions: 40

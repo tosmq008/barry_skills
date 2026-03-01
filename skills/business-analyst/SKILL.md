@@ -1,19 +1,28 @@
 ---
 name: business-analyst
-description: "This skill enables comprehensive business analysis as a senior business analyst expert. It performs market research, competitive analysis, business model evaluation, financial feasibility assessment, and strategic recommendations using professional frameworks (SWOT, Porter's Five Forces, Business Model Canvas, PESTEL, Value Chain Analysis). It analyzes product designs, feature specifications, and business ideas to produce actionable business analysis reports with data-driven insights."
+description: "This skill delivers end-to-end business analysis from macro trend sensing to executable strategy. It combines Carlota Perez techno-economic paradigm analysis, Charlie Munger multidisciplinary mental models, and integrated frameworks (PESTLE, Five Forces, Strategic Group Analysis, VRIO, Business Model Canvas, SWOT/TOWS, prioritization scorecard, strategic narrative)."
 license: MIT
-compatibility: "Requires web search capability for market research. Works with PRD documents, product designs, and business ideas. Supports Chinese and English output."
+compatibility: "Requires web search capability for market research and benchmark validation. Works with PRD documents, product designs, feature specifications, business ideas, and strategic planning scenarios. Supports Chinese and English output."
 metadata:
   category: business-analysis
   phase: planning
-  version: "1.0.0"
+  version: "2.0.0"
   author: business-expert
 allowed-tools: bash read_file write_file web_search web_fetch
 ---
 
 # Business Analyst Skill
 
-作为资深商业分析专家，运用专业的分析框架和方法论，对产品设计、功能规格、商业创意进行系统性的商业分析评估，产出专业的商业分析报告。
+作为资深商业分析专家，运用“宏观周期 + 行业结构 + 内部能力 + 战略落地”的完整链路，对产品设计、功能规格、商业创意进行系统评估，输出可执行、可排序、可汇报的商业战略方案。
+
+## Core Upgrades（本次版本升级要点）
+
+1. **宏观周期判断能力**：引入卡尔洛塔·佩雷斯技术-经济范式转移理论（五次技术革命、安装期/部署期/转折点）。
+2. **多学科洞察能力**：引入查理·芒格思维模型，将物理学、生物学、心理学用于交叉验证商业判断。
+3. **外部环境传导能力**：将 `PESTLE → 五力模型 → SWOT(OT)` 建立动态传导链。
+4. **内部能力严谨评估**：将 `商业模式画布(BMC) + VRIO` 联合用于 SWOT 中的 S/W 输入。
+5. **策略生成与筛选能力**：强化 `TOWS` 推导脚手架 + 战略选项优先级评分卡。
+6. **高层汇报能力**：新增“战略叙事（Strategic Narrative）”结构，支持从分析到决策说服。
 
 ## When to Use
 
@@ -25,6 +34,8 @@ allowed-tools: bash read_file write_file web_search web_fetch
 - 制定市场进入策略
 - 进行投资回报分析
 - 识别商业风险和机会
+- 制定中长期战略与资源配置优先级
+- 需要将多种分析结果整合为可决策汇报材料
 
 **不适用：**
 - 纯技术实现评审
@@ -36,15 +47,43 @@ allowed-tools: bash read_file write_file web_search web_fetch
 ## Workflow Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    商业分析专家工作流程                           │
-├─────────────────────────────────────────────────────────────────┤
-│  Phase 1: 需求理解 ──▶ Phase 2: 市场调研 ──▶ Phase 3: 竞品分析  │
-│       │                     │                      │            │
-│       ▼                     ▼                      ▼            │
-│  Phase 4: 商业评估 ──▶ Phase 5: 战略分析 ──▶ Phase 6: 报告生成  │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                   商业分析专家工作流（V2.0）                               │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Phase 0 理论视角校准                                                      │
+│   ▼                                                                        │
+│ Phase 1 需求理解与分析边界定义                                             │
+│   ▼                                                                        │
+│ Phase 2 宏观环境扫描（PESTLE + 周期定位）                                  │
+│   ▼                                                                        │
+│ Phase 3 行业竞争分析（五力 + 战略群组 + 目标公司深度分析）                 │
+│   ▼                                                                        │
+│ Phase 4 内部能力评估（BMC + VRIO）                                         │
+│   ▼                                                                        │
+│ Phase 5 综合战略推导（SWOT + TOWS）                                        │
+│   ▼                                                                        │
+│ Phase 6 战略选项评估与优先排序（评分卡）                                   │
+│   ▼                                                                        │
+│ Phase 7 战略叙事与报告输出                                                 │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Phase 0: 理论视角校准 (Theory Calibration)
+
+> ⚠️ **执行前必须读取 `references/strategic-frameworks.md` 的 1-2 章节（佩雷斯 + 芒格）**
+
+### 0.1 佩雷斯周期定位假设
+
+在正式分析前，先形成 1 个“宏观周期假设”：
+- 当前行业处于哪一轮技术革命的大周期中？
+- 更接近安装期、转折点，还是部署期？
+- 金融资本与生产资本的主导关系如何？
+
+### 0.2 多学科验证视角设定
+
+至少选择 3 个学科镜头（物理学/生物学/心理学）作为本次分析的交叉验证框架。
 
 ---
 
@@ -83,6 +122,13 @@ allowed-tools: bash read_file write_file web_search web_fetch
 | 商业模式评估 | 评估盈利能力 | 商业模式画布、财务分析 |
 | 风险评估 | 识别潜在风险 | 风险清单、缓解策略 |
 
+### 1.3 分析边界与时间跨度定义
+
+**必须明确：**
+- 分析周期：短期（0-12月）/中期（1-3年）/长期（3-10年）
+- 决策对象：产品级 / 业务线级 / 公司级
+- 关键约束：预算、组织能力、政策边界、时间窗口
+
 ---
 
 ## Phase 2: 市场调研 (Market Research)
@@ -96,6 +142,11 @@ allowed-tools: bash read_file write_file web_search web_fetch
 - 技术发展趋势
 - 政策法规影响
 - 行业增长率预测
+
+**新增要求（佩雷斯维度）：**
+- 判断行业是否进入“安装期狂热”“转折点调整”或“部署期扩散”
+- 明确本行业的关键基础设施（如算力、数据、物流、电网、渠道网络等）
+- 给出周期阶段对应的机会/风险清单
 
 **信息来源：**
 - 行业研究报告（艾瑞、易观、Gartner、IDC）
@@ -122,6 +173,10 @@ allowed-tools: bash read_file write_file web_search web_fetch
 - 消费能力
 - 决策因素
 
+**新增要求（芒格维度）：**
+- 用户行为中是否存在社会认同、损失厌恶、激励扭曲等心理偏差
+- 用至少两条独立证据交叉验证用户判断（访谈/行为数据/交易数据）
+
 ---
 
 ## Phase 3: 竞品分析 (Competitive Analysis)
@@ -138,7 +193,15 @@ allowed-tools: bash read_file write_file web_search web_fetch
 | 间接竞品 | 替代解决方案 | 用户迁移成本、差异化 |
 | 潜在竞品 | 可能进入的玩家 | 进入壁垒、威胁程度 |
 
-### 3.2 竞品对比矩阵
+### 3.2 战略群组分析（必做）
+
+**执行要求：**
+- 选择 2 个关键战略维度（如价格带、技术深度、渠道控制力）
+- 绘制战略群组图谱并标注群组规模
+- 识别群组间移动壁垒（品牌、专利、规模、渠道、监管）
+- 提炼空白定位机会与潜在跨群组威胁
+
+### 3.3 竞品对比矩阵
 
 **对比维度：**
 
@@ -151,7 +214,15 @@ allowed-tools: bash read_file write_file web_search web_fetch
 | 技术能力 | 技术架构、创新能力、专利 |
 | 品牌影响 | 品牌知名度、用户口碑、媒体曝光 |
 
-### 3.3 差异化分析
+### 3.4 目标公司深度分析（可选但建议）
+
+**四大模块：**
+- 财务健康（盈利、现金流、偿债、营运）
+- 技术护城河（专利、数据、网络效应、转换成本）
+- 组织能力与关键人物（管理层、人才结构、执行力）
+- 战略动态（并购、合作、产品路线、市场动作）
+
+### 3.5 差异化分析
 
 **差异化策略评估：**
 - 功能差异化
@@ -166,7 +237,7 @@ allowed-tools: bash read_file write_file web_search web_fetch
 
 > ⚠️ **执行前必须读取 `references/business-model-canvas.md` 获取商业模式画布模板**
 
-### 4.1 商业模式画布分析
+### 4.1 商业模式画布分析（BMC）
 
 **九大模块：**
 1. 客户细分 (Customer Segments)
@@ -179,7 +250,20 @@ allowed-tools: bash read_file write_file web_search web_fetch
 8. 关键合作 (Key Partnerships)
 9. 成本结构 (Cost Structure)
 
-### 4.2 盈利模式评估
+### 4.2 VRIO 资源能力评估（必做）
+
+**VRIO 维度：**
+- Value（价值）
+- Rarity（稀有性）
+- Inimitability（难模仿性）
+- Organization（组织支撑）
+
+**输出要求：**
+- 对核心资源/能力逐项做 VRIO 评估
+- 给出竞争含义：竞争劣势 / 竞争对等 / 暂时优势 / 可持续优势
+- 将结果映射进 SWOT 的 S/W
+
+### 4.3 盈利模式评估
 
 **常见盈利模式：**
 
@@ -192,7 +276,7 @@ allowed-tools: bash read_file write_file web_search web_fetch
 | 授权费 | 技术/内容授权 | 技术、IP |
 | 硬件销售 | 产品销售 | 硬件产品 |
 
-### 4.3 财务可行性分析
+### 4.4 财务可行性分析
 
 **关键财务指标：**
 
@@ -211,7 +295,14 @@ allowed-tools: bash read_file write_file web_search web_fetch
 
 > ⚠️ **执行前必须读取 `references/strategic-frameworks.md` 获取战略分析框架**
 
-### 5.1 SWOT 分析
+### 5.1 外部传导链（PESTLE → 五力 → SWOT-O/T）
+
+**必须执行的传导步骤：**
+1. 将 PESTLE 每个关键趋势映射到五力模型，标注力量变化方向（增强/减弱）
+2. 基于“影响度 × 概率”筛选高优先级外部因素
+3. 转化为 SWOT 中 Opportunities/Threats，并注明来源证据
+
+### 5.2 SWOT 分析
 
 | 维度 | 分析要点 |
 |------|----------|
@@ -220,7 +311,7 @@ allowed-tools: bash read_file write_file web_search web_fetch
 | Opportunities | 外部机会、市场趋势、政策利好 |
 | Threats | 外部威胁、竞争压力、政策风险 |
 
-### 5.2 Porter's Five Forces 分析
+### 5.3 Porter's Five Forces 分析
 
 | 力量 | 评估维度 |
 |------|----------|
@@ -230,7 +321,7 @@ allowed-tools: bash read_file write_file web_search web_fetch
 | 替代品威胁 | 替代品可用性、性价比、转换成本 |
 | 行业竞争程度 | 竞争者数量、行业增长、差异化程度 |
 
-### 5.3 PESTEL 分析
+### 5.4 PESTLE 分析
 
 | 因素 | 分析内容 |
 |------|----------|
@@ -241,7 +332,14 @@ allowed-tools: bash read_file write_file web_search web_fetch
 | Environmental | 环保要求、可持续发展、碳中和 |
 | Legal | 法律法规、知识产权、数据隐私 |
 
-### 5.4 风险评估
+### 5.5 TOWS 战略推导（必做）
+
+**输出要求：**
+- 按 SO / ST / WO / WT 四类生成可执行战略选项
+- 每个选项必须包含：行动、对象、时间、负责人、关键指标
+- 每类至少 2 条高质量策略（可按项目规模调整）
+
+### 5.6 风险评估
 
 **风险矩阵：**
 
@@ -255,33 +353,56 @@ allowed-tools: bash read_file write_file web_search web_fetch
 
 ---
 
-## Phase 6: 报告生成 (Report Generation)
+## Phase 6: 战略评估与优先排序 (Strategy Prioritization)
+
+> ⚠️ **执行前必须读取 `references/strategic-frameworks.md` 的“战略评分卡与优先级矩阵”章节**
+
+### 6.1 评分维度（建议）
+
+| 维度 | 说明 |
+|------|------|
+| 战略重要性 | 对中长期目标的贡献度 |
+| 资源匹配度 | 与现有资金/人才/技术匹配程度 |
+| 实施难度 | 组织与执行复杂度 |
+| 预期回报 | 财务与战略回报 |
+| 风险暴露 | 实施过程风险水平 |
+| 见效周期 | 从投入到看到成果的时间 |
+
+### 6.2 产出要求
+
+- 建立加权评分卡并完成评分
+- 输出优先级：P0 / P1 / P2
+- 明确“现在做 / 后续做 / 不做”的决策理由
+
+---
+
+## Phase 7: 报告生成 (Report Generation)
 
 > ⚠️ **执行前必须读取 `references/report-template.md` 获取报告模板**
 
-### 6.1 商业分析报告结构
+### 7.1 商业分析报告结构
 
 ```markdown
 # 商业分析报告: [项目名称]
 
-## 执行摘要
-[核心发现和建议的一段话总结]
+## 报告信息
+## 执行摘要（结论 + 核心建议）
 
-## 1. 项目概述
-## 2. 市场分析
-## 3. 竞争分析
-## 4. 商业模式分析
-## 5. 战略分析
-## 6. 风险评估
-## 7. 综合评估
-## 8. 战略建议
-## 9. 行动计划
+## 1. 分析任务定义与边界
+## 2. 宏观环境与周期定位（PESTLE + 佩雷斯）
+## 3. 行业竞争格局（五力 + 战略群组）
+## 4. 内部环境评估（BMC + VRIO）
+## 5. SWOT综合诊断与TOWS战略推导
+## 6. 战略选项评估与优先排序（评分卡）
+## 7. 战略叙事（现状→冲突→抉择→承诺）
+## 8. 行动计划与里程碑
+## 9. 风险清单与对冲
 ## 附录
 ```
 
-### 6.2 商业可行性评分
+### 7.2 商业可行性评分
 
-**评分维度：**
+**评分维度（项目准入评分，可选）：**
 
 | 维度 | 权重 | 评分标准 |
 |------|------|----------|
@@ -298,6 +419,10 @@ allowed-tools: bash read_file write_file web_search web_fetch
 - 45-59: 需要改进 ⭐⭐
 - 0-44: 不推荐 ⭐
 
+> 说明：
+> - `Phase 6` 的评分卡用于“战略选项优先级排序”（选A/B/C策略）。
+> - `Phase 7.2` 的评分用于“项目整体商业可行性判断”（做/不做）。
+
 ---
 
 ## Output Files
@@ -308,7 +433,22 @@ allowed-tools: bash read_file write_file web_search web_fetch
 | 市场调研报告 | `docs/business/market-research.md` | 市场调研详情 |
 | 竞品分析报告 | `docs/business/competitive-analysis.md` | 竞品分析详情 |
 | 商业模式画布 | `docs/business/business-model-canvas.md` | 商业模式分析 |
+| SWOT-TOWS策略清单 | `docs/business/swot-tows-strategy.md` | 四象限策略与执行要点 |
 | 风险评估报告 | `docs/business/risk-assessment.md` | 风险评估详情 |
+| 战略优先级评分卡 | `docs/business/strategy-prioritization-scorecard.md` | 战略选项评分与排序 |
+| 战略叙事稿 | `docs/business/strategic-narrative.md` | 面向决策层的叙事化汇报稿 |
+
+---
+
+## Quality Checklist（交付前必检）
+
+- 是否明确了宏观周期位置（佩雷斯）并给出阶段依据
+- 是否至少使用 3 个学科模型进行交叉验证（芒格）
+- 是否完成 PESTLE → 五力 → SWOT(OT) 的可追溯传导
+- 是否完成 BMC + VRIO 联合评估并映射到 SWOT(SW)
+- 是否产出 TOWS 四象限可执行策略（含负责人与指标）
+- 是否使用评分卡进行优先级排序并给出取舍理由
+- 是否形成完整战略叙事（现状→冲突→选择→承诺）
 
 ---
 
@@ -319,7 +459,7 @@ allowed-tools: bash read_file write_file web_search web_fetch
 | `references/market-research-guide.md` | 市场调研指南 |
 | `references/competitive-analysis-template.md` | 竞品分析模板 |
 | `references/business-model-canvas.md` | 商业模式画布模板 |
-| `references/strategic-frameworks.md` | 战略分析框架 |
+| `references/strategic-frameworks.md` | 战略分析框架（含佩雷斯/芒格/传导链/TOWS/评分卡/叙事） |
 | `references/financial-analysis-guide.md` | 财务分析指南 |
 | `references/report-template.md` | 报告模板 |
 

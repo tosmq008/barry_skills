@@ -1,0 +1,27 @@
+version: "1.0"
+
+defaults:
+  max_sessions: 3
+  target_health: 80
+
+ideas:
+  - id: "hello-api"
+    name: "Hello API"
+    requirement: |
+      A minimal FastAPI application with a single GET /hello endpoint
+      that returns {"message": "Hello, World!"}. Include a test file
+      with pytest that verifies the endpoint returns 200 and correct JSON.
+    priority: 1
+    tags: ["backend", "api"]
+    max_sessions: 3
+
+  - id: "calc-api"
+    name: "Calculator API"
+    requirement: |
+      A FastAPI application with POST /calculate endpoint that accepts
+      JSON body {operation: "add"|"subtract"|"multiply"|"divide", a: number, b: number}
+      and returns {result: number}. Include input validation (reject division by zero),
+      error handling, and a pytest test file.
+    priority: 2
+    tags: ["backend", "api"]
+    max_sessions: 5

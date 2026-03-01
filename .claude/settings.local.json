@@ -6,7 +6,8 @@
       "Bash(set)",
       "Bash(powershell -Command \"[Environment]::GetFolderPath\\(''ApplicationData''\\)\")",
       "Bash(wc:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "mcp__firecrawl__firecrawl_search"
     ]
   }
 }
