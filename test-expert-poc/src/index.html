@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📝 Todo App</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+        .container { max-width: 600px; margin: 40px auto; padding: 20px; }
+        h1 { text-align: center; margin-bottom: 20px; font-size: 28px; }
+        .input-area { display: flex; gap: 8px; margin-bottom: 20px; }
+        .input-area input {
+            flex: 1; padding: 12px 16px; border: 2px solid #ddd; border-radius: 8px;
+            font-size: 16px; outline: none; transition: border-color 0.2s;
+        }
+        .input-area input:focus { border-color: #4a90d9; }
+        .input-area button {
+            padding: 12px 24px; background: #4a90d9; color: white; border: none;
+            border-radius: 8px; font-size: 16px; cursor: pointer; transition: background 0.2s;
+        }
+        .input-area button:hover { background: #357abd; }
+        .filters { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; }
+        .filters button {
+            padding: 6px 16px; border: 1px solid #ddd; border-radius: 20px;
+            background: white; cursor: pointer; font-size: 14px; transition: all 0.2s;
+        }
+        .filters button.active { background: #4a90d9; color: white; border-color: #4a90d9; }
+        .count { margin-left: auto; color: #888; font-size: 14px; }
+        .todo-list { list-style: none; }
+        .todo-item {
+            display: flex; align-items: center; padding: 12px 16px; background: white;
+            border-radius: 8px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: all 0.2s;
+        }
+        .todo-item:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
+        .todo-item input[type="checkbox"] { width: 20px; height: 20px; margin-right: 12px; cursor: pointer; }
+        .todo-item .content { flex: 1; font-size: 16px; }
+        .todo-item.completed .content { text-decoration: line-through; color: #aaa; }
+        .todo-item .date { color: #aaa; font-size: 12px; margin-right: 12px; }
+        .todo-item .delete {
+            opacity: 0; padding: 4px 8px; background: none; border: none;
+            color: #e74c3c; cursor: pointer; font-size: 18px; transition: opacity 0.2s;
+        }
+        .todo-item:hover .delete { opacity: 1; }
+        .empty { text-align: center; color: #aaa; padding: 40px 0; font-size: 16px; }
+        .todo-item .content[contenteditable="true"] {
+            outline: 2px solid #4a90d9; border-radius: 4px; padding: 2px 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📝 Todo App</h1>
+        <div class="input-area">
+            <input type="text" id="todoInput" placeholder="添加新的待办事项..." data-testid="todo-input">
+            <button id="addBtn" data-testid="add-btn">添加</button>
+        </div>
+        <div class="filters">
+            <button class="active" data-filter="all" data-testid="filter-all">全部</button>
+            <button data-filter="active" data-testid="filter-active">未完成</button>
+            <button data-filter="completed" data-testid="filter-completed">已完成</button>
+            <span class="count" data-testid="todo-count">0/0 已完成</span>
+        </div>
+        <ul class="todo-list" id="todoList" data-testid="todo-list"></ul>
+    </div>
+
+    <script>
+        // BUG intentional: 没有做最大长度 200 的限制
+        let todos = JSON.parse(localStorage.getItem('todos') || '[]');
+        let currentFilter = 'all';
+
+        const input = document.getElementById('todoInput');
+        const addBtn = document.getElementById('addBtn');
+        const todoList = document.getElementById('todoList');
+
+        function generateId() {
+            return Date.now().toString(36) + Math.random().toString(36).substr(2);
+        }
+
+        function formatDate(timestamp) {
+            const d = new Date(timestamp);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+
+        function addTodo() {
+            const text = input.value.trim();
+            // BUG intentional: 允许空内容添加（缺少空值校验）
+            const todo = {
+                id: generateId(),
+                text: text,
+                completed: false,
+                createdAt: Date.now()
+            };
+            todos.push(todo); // BUG intentional: push 到末尾而不是 unshift 到顶部
+            saveTodos();
+            input.value = '';
+            render();
+        }
+
+        function toggleTodo(id) {
+            const todo = todos.find(t => t.id === id);
+            if (todo) {
+                todo.completed = !todo.completed;
+                saveTodos();
+                render();
+            }
+        }
+
+        function deleteTodo(id) {
+            todos = todos.filter(t => t.id !== id);
+            saveTodos();
+            render();
+        }
+
+        function startEdit(id, el) {
+            el.contentEditable = true;
+            el.focus();
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            range.collapse(false);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+
+            el.addEventListener('keydown', function handler(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    finishEdit(id, el);
+                    el.removeEventListener('keydown', handler);
+                } else if (e.key === 'Escape') {
+                    // BUG intentional: Esc 取消编辑时没有恢复原文本
+                    el.contentEditable = false;
+                    el.removeEventListener('keydown', handler);
+                }
+            });
+
+            el.addEventListener('blur', function blurHandler() {
+                finishEdit(id, el);
+                el.removeEventListener('blur', blurHandler);
+            });
+        }
+
+        function finishEdit(id, el) {
+            const newText = el.textContent.trim();
+            // BUG intentional: 允许保存空内容
+            const todo = todos.find(t => t.id === id);
+            if (todo) {
+                todo.text = newText;
+                saveTodos();
+            }
+            el.contentEditable = false;
+            render();
+        }
+
+        function saveTodos() {
+            localStorage.setItem('todos', JSON.stringify(todos));
+        }
+
+        function updateCount() {
+            const completed = todos.filter(t => t.completed).length;
+            const total = todos.length;
+            document.querySelector('.count').textContent = `${completed}/${total} 已完成`;
+        }
+
+        function render() {
+            let filtered = todos;
+            if (currentFilter === 'active') {
+                filtered = todos.filter(t => !t.completed);
+            } else if (currentFilter === 'completed') {
+                filtered = todos.filter(t => t.completed);
+            }
+
+            // BUG intentional: 没有按创建时间倒序排序
+            if (filtered.length === 0) {
+                todoList.innerHTML = '<li class="empty">暂无待办事项</li>';
+            } else {
+                todoList.innerHTML = filtered.map(todo => `
+                    <li class="todo-item ${todo.completed ? 'completed' : ''}" data-testid="todo-item-${todo.id}">
+                        <input type="checkbox" ${todo.completed ? 'checked' : ''} 
+                            onchange="toggleTodo('${todo.id}')" data-testid="checkbox-${todo.id}">
+                        <span class="content" ondblclick="startEdit('${todo.id}', this)" 
+                            data-testid="content-${todo.id}">${todo.text}</span>
+                        <span class="date">${formatDate(todo.createdAt)}</span>
+                        <button class="delete" onclick="deleteTodo('${todo.id}')" 
+                            data-testid="delete-${todo.id}">🗑</button>
+                    </li>
+                `).join('');
+            }
+            updateCount();
+        }
+
+        // Event listeners
+        addBtn.addEventListener('click', addTodo);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') addTodo();
+        });
+
+        document.querySelectorAll('.filters button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelector('.filters button.active').classList.remove('active');
+                btn.classList.add('active');
+                currentFilter = btn.dataset.filter;
+                render();
+            });
+        });
+
+        // Initial render
+        render();
+    </script>
+</body>
+</html>

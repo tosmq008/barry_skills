@@ -1,0 +1,67 @@
+{
+  "version": "2.0.0",
+  "project": {
+    "name": "poc-agent-team",
+    "path": "/Users/shuidi/work_ai/barry_skills/poc-agent-team",
+    "type": "unknown",
+    "created_at": "2026-03-27T06:37:28Z"
+  },
+  "health": {
+    "score": 81,
+    "breakdown": {
+      "requirements": 20,
+      "code": 25,
+      "tests": 15,
+      "runnable": 15,
+      "quality": 6
+    },
+    "details": {
+      "requirements": "4 PRD docs (complete)",
+      "code": "56 files, 39 API modules",
+      "tests": "15 test files",
+      "runnable": "Has start script + entry point",
+      "quality": "Linter not available, default"
+    },
+    "usable": true,
+    "target": 80,
+    "assessed_at": "2026-03-27T06:38:57Z",
+    "history": [
+      {
+        "timestamp": "2026-03-27T06:37:39Z",
+        "score": 6
+      },
+      {
+        "timestamp": "2026-03-27T06:38:18Z",
+        "score": 26
+      },
+      {
+        "timestamp": "2026-03-27T06:38:57Z",
+        "score": 81
+      }
+    ],
+    "delta": 55
+  },
+  "status": "completed",
+  "exit_reason": "usable_reached",
+  "current_action": null,
+  "agent_coordination": {
+    "active_agents": [],
+    "completed_agents": [],
+    "pending_sync": false
+  },
+  "action_history": [],
+  "decision_log": [],
+  "blockers": [],
+  "errors": [],
+  "sessions": {
+    "count": 0,
+    "total_turns": 0,
+    "current_session": null
+  },
+  "last_heartbeat": "2026-03-27T06:38:57Z",
+  "metrics": {
+    "total_duration_seconds": 0,
+    "parallel_executions": 0,
+    "avg_health_delta_per_session": 0
+  }
+}

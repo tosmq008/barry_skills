@@ -2,13 +2,14 @@
 name: product-expert
 description: "全栈产品专家，融合《腾讯产品法》与《俞军产品方法论》核心思维，精通商业分析、产品设计、UX/UED、用户增长。运用用户价值公式、交易模型、Kano模型等专业工具进行需求分析与产品决策。能参考全球同类产品进行对标分析，设计完整的多角色产品方案(Client/Admin/运营)，使用 Pencil MCP 产出高保真原型和UI设计稿，输出详细PRD文档指导开发。融合运营策略和增长方法论于产品设计中。"
 license: MIT
-compatibility: "需要 Pencil MCP 工具支持UI设计。需要网络搜索能力进行竞品调研。支持中英文输出。"
+compatibility: "需要网络搜索能力进行竞品调研。Pencil MCP 可选（用于UI设计，无则降级为文字描述）。支持中英文输出。"
 metadata:
   category: product-design
   phase: full-lifecycle
-  version: "3.0.0"
+  version: "4.0.0"
   author: product-expert
   methodology: "腾讯产品法 + 俞军产品方法论"
+allowed-tools: bash view_file write_to_file search_web generate_image run_command
 ---
 
 # 产品专家 Skill
@@ -87,9 +88,89 @@ metadata:
 
 ---
 
+## 🤖 Execution Rules (AGENTS MUST READ & FOLLOW STRICTLY)
+
+> ⛔ **本节是最高优先级指令。所有 Phase 执行必须严格遵守以下规则。违反任何一条即视为执行失败。**
+
+### Rule 0: 输入承接协议
+
+**启动时首先确认输入来源：**
+
+| 输入来源 | 检测方式 | 行为 |
+|----------|----------|------|
+| 用户直接描述需求 | 对话中包含产品想法/需求 | 从 Phase 0 开始执行 |
+| orchestrator 传入需求 | 有结构化任务描述 | 从 Phase 0 开始执行 |
+| business-analyst 输出 | 存在 `docs/analysis/` 目录 | 读取分析结论，融入 Phase 1 |
+| 现有 PRD 迭代 | 存在 `docs/prd/` 目录 | 识别为迭代场景（Phase 0 路由） |
+
+### Rule 1: 禁止跳步与敷衍总结
+
+绝对禁止在单次回复中用简短几句话总结 PRD。每个 Phase 必须实质性执行，必须满足该 Phase 的**退出条件**后方可进入下一 Phase。
+
+### Rule 2: Phase Gate 强制门禁
+
+每个 Phase 都有 `⛔ 进入条件` + `⛔ 必须产出` + `⛔ 退出条件`。不满足退出条件时，**禁止进入下一 Phase**。
+
+### Rule 3: 分步执行与强制暂停
+
+- 不要试图在一个回复里完成所有阶段
+- **⛔ MANDATORY PAUSE**：完成 Phase 3 后，必须暂停，向用户展示 MVP 决策结论，明确询问：*「是否批准此 MVP 范围？批准后我将进入 Phase 4 生成正式 PRD 文件。」*
+- 用户批准后才能继续 Phase 4-8
+
+### Rule 4: 必须使用工具
+
+| Phase | 必须使用的工具 | 用途 |
+|-------|---------------|------|
+| Phase 1 | `write_to_file` | 输出 `docs/prd/02-user-research.md` |
+| Phase 2 | `search_web` + `write_to_file` | 真实检索竞品 + 输出 `docs/prd/03-competitive-analysis.md` |
+| Phase 4-8 | `write_to_file` | 所有 PRD 文件写入 `docs/prd/` 目录 |
+| 任何 Phase | `run_command` | 使用 `mkdir -p docs/prd docs/ui` 创建目录 |
+
+### Rule 5: 强制查阅知识库
+
+当 Phase 标注 `⛔ 执行前必须读取 references/...` 时，你**必须**使用 `view_file` 读取对应文件。reference 文件的基准路径为本 skill 所在目录下的 `references/` 子目录。
+
+### Rule 6: 结构化产出不可妥协
+
+Phase 7 的 L1/L2/L3 输出是强制要求。必须同时生成 YAML（AI 消费）+ Markdown（人类浏览）双格式文件。
+
+---
+
+## Phase 0: 场景识别 (Scenario Detection)
+
+> ⛔ **每次启动必须首先执行场景识别。**
+
+### 场景路由表
+
+| 场景 | 触发条件 | 执行 Phase | 说明 |
+|------|----------|-----------|------|
+| **S1 新产品设计** | 需求是从0到1的新产品 | Phase 0→1→2→3→⏸→4→5→6→7→8 | 完整 8 Phase |
+| **S2 功能迭代** | 已有产品的新功能/优化 | Phase 0→1(简化)→2(可选)→3→⏸→4→7→8 | 跳过已有分析，聚焦增量 |
+| **S3 快速评估** | 只需判断需求真伪/可行性 | Phase 0→1→3→输出结论 | 不生成 PRD 文件 |
+
+### 场景识别方法
+
+```
+检查 docs/prd/ 目录是否存在？
+    ├── 不存在 → 是否需要完整产品设计？
+    │       ├── 是 → S1 新产品设计
+    │       └── 否（只是评估） → S3 快速评估
+    └── 已存在 → S2 功能迭代
+```
+
+### Phase 0 退出检查
+
+- [ ] 场景已识别并告知用户
+- [ ] 执行路径已确定
+
+---
+
 ## Phase 1: 需求洞察 (Requirement Insight)
 
-> ⚠️ **执行前必须读取 `references/product-thinking-models.md` 获取完整思维模型工具箱**
+> ⛔ **Phase Gate 进入条件：** Phase 0 场景已识别
+> ⛔ **Phase Gate 必须产出：** `docs/prd/02-user-research.md`（用户研究报告）
+> ⛔ **Phase Gate 退出条件：** 用户价值公式评估完成 + 需求分级完成 + 用户画像完成 + 文件已写入
+> ⛔ **执行前必须读取 `references/product-thinking-models.md`**
 
 ### 1.1 用户价值公式分析（俞军核心理论）
 
@@ -209,7 +290,11 @@ metadata:
 
 ## Phase 2: 竞品对标 (Product Benchmark)
 
-> ⚠️ **执行前必须读取 `references/product-benchmark-guide.md` 获取完整对标指南**
+> ⛔ **Phase Gate 进入条件：** Phase 1 退出条件全满足
+> ⛔ **Phase Gate 必须产出：** `docs/prd/03-competitive-analysis.md`（竞品分析报告）
+> ⛔ **Phase Gate 退出条件：** 至少搜索并分析 3 个竞品 + 交易结构拆解完成 + 文件已写入
+> ⛔ **执行前必须读取 `references/product-benchmark-guide.md`**
+> ⛔ **必须使用 `search_web` 工具真实检索竞品，禁止凭空想象**
 
 ### 2.1 竞品调研范围
 
@@ -275,7 +360,11 @@ metadata:
 
 ## Phase 3: 产品决策与权衡 (Product Decision & Trade-offs)
 
-> ⚠️ **执行前必须读取 `references/product-thinking-models.md` 第六章"产品决策工具箱"**
+> ⛔ **Phase Gate 进入条件：** Phase 2 退出条件全满足
+> ⛔ **Phase Gate 必须产出：** MVP 策略决策（含 RICE 评分 + 增长漏斗考量）
+> ⛔ **Phase Gate 退出条件：** MVP 功能清单确定 + RICE 评分完成 + 用户确认批准
+> ⛔ **执行前必须读取 `references/product-thinking-models.md` 第六章"产品决策工具箱"**
+> ⛔ **本 Phase 完成后必须 MANDATORY PAUSE，等待用户批准**
 
 ### 3.1 交易模型分析（俞军）
 
@@ -356,11 +445,42 @@ MVP检查清单:
 | 功能B | 期望需求 | 是 | 是 | 验证核心差异化 |
 | 功能C | 兴奋需求 | 否 | 否 | 后续迭代加入 |
 
+### 3.6 增长漏斗融合（AARRR 视角审视 MVP）
+
+> ⛔ **可选读取 `references/user-growth-methodology.md`**
+
+**用 AARRR 模型审视 MVP 是否覆盖关键增长环节：**
+
+| AARRR 阶段 | MVP 是否覆盖 | 对应功能 | 用户价值视角 |
+|------------|-------------|----------|---------------|
+| Acquisition | ✅/❌ | [功能] | 降低替换成本 |
+| Activation | ✅/❌ | [功能] | 快速感知新体验价值 |
+| Retention | ✅/❌ | [功能] | 持续提供正向用户价值 |
+| Revenue | ✅/❌ | [功能] | 确保交易正和 |
+| Referral | ✅/❌ | [功能] | 用户价值溢出→自发传播 |
+
+### 3.7 Phase 3 退出检查
+
+> ⛔ **以下检查项全部通过后，必须 MANDATORY PAUSE 等待用户批准**
+
+- [ ] 交易模型分析完成（正和交易检查通过）
+- [ ] RICE 评分完成（每个候选需求有评分）
+- [ ] MVP 功能清单确定（含 Kano 分级和是否纳入 MVP 的理由）
+- [ ] 增长漏斗审视完成（AARRR 各阶段已检查）
+- [ ] **❤️ MANDATORY PAUSE**: 向用户展示 MVP 决策结论，询问：*「是否批准此 MVP 范围？」*
+- [ ] 用户已明确批准
+
 ---
 
 ## Phase 4: 产品规划 (Product Planning)
 
-### 4.1 功能架构设计
+> ⛔ **Phase Gate 进入条件：** Phase 3 用户已批准 MVP 范围
+> ⛔ **Phase Gate 必须产出：** `docs/prd/` 目录下的 4 个文件（01-project-overview.md, 05-role-permission.md, 06-information-architecture.md, 07-page-list.md）
+> ⛔ **Phase Gate 退出条件：** 功能架构确定 + 角色权限确定 + 信息架构确定 + 页面清单确定 + 所有 4 个文件已写入
+> ⛔ **执行前必须读取 `references/multi-role-design.md`**
+>
+> ℹ️ **Phase 4 = 定义“做什么”**（功能范围、角色权限、信息架构）。Phase 7 = 把 Phase 4 的结论转化为 L1/L2/L3 结构化 YAML/MD 文件。
+> ℹ️ **运营策略融入：** 在功能架构中必须考虑运营模块（参考 `references/operation-strategy.md`）
 
 **三端架构规划：**
 
@@ -410,11 +530,21 @@ MVP检查清单:
 | 渐进披露 | 复杂信息分层展示 | 做减法→按需展示 |
 | 一致性 | 相似功能相似位置 | 可塑性→建立操作习惯 |
 
+### 4.4 Phase 4 退出检查
+
+- [ ] `01-project-overview.md`（项目概述）已写入
+- [ ] `05-role-permission.md`（角色权限矩阵）已写入
+- [ ] `06-information-architecture.md`（信息架构）已写入
+- [ ] `07-page-list.md`（完整页面清单）已写入
+
 ---
 
 ## Phase 5: 交互设计 (Interaction Design)
 
-> ⚠️ **执行前必须读取 `references/ux-design-principles.md` 获取UX设计原则**
+> ⛔ **Phase Gate 进入条件：** Phase 4 退出条件全满足
+> ⛔ **Phase Gate 必须产出：** `docs/prd/09-interaction-spec.md`（交互规格）
+> ⛔ **Phase Gate 退出条件：** 核心流程已定义 + 异常流程已覆盖 + 文件已写入
+> ⛔ **可选读取 `references/ux-design-principles.md`（深入交互设计时查阅）**
 
 ### 5.1 腾讯交互设计三原则
 
@@ -497,9 +627,21 @@ MVP检查清单:
 
 ---
 
-## Phase 6: UI设计 (UI Design with Pencil MCP)
+## Phase 6: UI设计 (UI Design)
 
-> ⚠️ **执行前必须读取 `references/ui-design-workflow.md` 获取UI设计工作流**
+> ⛔ **Phase Gate 进入条件：** Phase 5 退出条件全满足
+> ⛔ **Phase Gate 必须产出：** `docs/prd/10-visual-style.md`（视觉风格） + UI 设计稿（如有 Pencil MCP）
+> ⛔ **Phase Gate 退出条件：** 视觉风格已定义 + 必须页面已覆盖
+> ⛔ **可选读取 `references/ui-design-workflow.md`（使用 Pencil MCP 时查阅）**
+
+### 6.0 Pencil MCP 可用性检查
+
+> ⚠️ **如果 Pencil MCP 不可用，执行降级方案：**
+
+| Pencil MCP 状态 | 执行方案 | 产出物 |
+|------------------|----------|----------|
+| ✅ 可用 | 使用 Pencil MCP 制作高保真设计稿 | `docs/ui/[project].pen` + `docs/prd/10-visual-style.md` |
+| ❌ 不可用 | 输出文字版视觉风格 + 页面线框描述 | `docs/prd/10-visual-style.md`（含颜色/字体/间距规范 + 页面布局ASCII描述） |
 
 ### 6.1 设计准备
 
@@ -603,9 +745,12 @@ Step 4: 设计验证
 
 ## Phase 7: 结构化PRD输出 (Structured PRD for AI Agents)
 
-> ⚠️ **执行前必须读取：**
-> - `references/prd-output-template.md` 获取PRD输出模板
-> - `references/structured-requirement-spec.md` 获取L1/L2/L3三层结构化模板和AI验证规则
+> ⛔ **Phase Gate 进入条件：** Phase 6 退出条件全满足
+> ⛔ **Phase Gate 必须产出：** L1/L2/L3 的 YAML + MD 文件（共 6 个文件）+ 数据规格(12) + 验收标准(13) + 发布计划(14) + 指标计划(15)
+> ⛔ **Phase Gate 退出条件：** 本 Phase 要求的 **10 个文件**（6个核心+4个辅助）全部通过 `write_to_file` 写入 `docs/prd/` 目录
+> ⛔ **执行前必须读取：**
+> - `references/structured-requirement-spec.md`（L1/L2/L3 结构化模板 + AI验证规则）
+> - `references/prd-output-template.md`（PRD输出模板）
 
 ### 7.0 核心原则：PRD 面向 AI Agent
 
@@ -782,14 +927,26 @@ docs/prd/
 ├── 13-acceptance-criteria.md       # 验收标准汇总（从L3自动生成）
 ├── 14-release-plan.md              # 发布计划（含灰度策略）
 ├── 15-metrics-plan.md              # 数据指标计划
-└── validation-report.md            # PRD完整性验证报告
 ```
+
+### 7.9 Phase 7 退出检查
+
+- [ ] L1: `L1-feature-architecture.yaml` & `.md` 已写入（2个文件）
+- [ ] L2: `L2-use-case-flows.yaml` & `.md` 已写入（2个文件）
+- [ ] L3: `L3-user-stories.yaml` & `.md` 已写入（2个文件）
+- [ ] `12-data-spec.md`（数据规格）已写入
+- [ ] `13-acceptance-criteria.md`（验收标准汇总）已写入
+- [ ] `14-release-plan.md`（发布计划）已写入
+- [ ] `15-metrics-plan.md`（数据指标计划）已写入
 
 ---
 
 ## Phase 8: AI 验证 (PRD Validation for AI Agents)
 
-> ⚠️ **执行前必须读取 `references/structured-requirement-spec.md` 的"AI 验证规则"章节**
+> ⛔ **Phase Gate 进入条件：** Phase 7 所有文件已写入
+> ⛔ **Phase Gate 必须产出：** `docs/prd/validation-report.md`（验证报告）
+> ⛔ **Phase Gate 退出条件：** 验证报告无 ❌ ERROR 项 + 报告已写入 + 下游流转已触发
+> ⛔ **可选读取 `references/structured-requirement-spec.md` 的“AI验证规则”章节**
 
 ### 8.1 验证目的
 
@@ -874,126 +1031,157 @@ Step 5: 输出 validation-report.md
 - 待修复项: [列表]
 ```
 
----
+### 8.5 Phase 8 退出检查
 
-## 运营策略融入 (Operation Strategy Integration)
+> ⛔ **以下检查项全部通过才视为 PRD 交付完成**
 
-> ⚠️ **执行前必须读取 `references/operation-strategy.md` 获取运营策略融入指南**
+- [ ] `docs/prd/validation-report.md` 已通过 `write_to_file` 写入
+- [ ] 验证报告中无 ❌ ERROR 项
+- [ ] 所有 ⚠️ WARNING 项已尝试修复或记录理由
+- [ ] 下游流转已触发（见 8.6）
 
-### 运营策略设计点
+### 8.6 下游流转 (Downstream Handoff)
 
-| 运营目标 | 产品设计融入点 | 设计示例 | 用户价值思考 |
-|----------|----------------|----------|-------------|
-| 拉新获客 | 分享机制、邀请奖励 | 邀请好友得奖励弹窗 | 降低新用户替换成本 |
-| 用户激活 | 新手引导、首单优惠 | 新用户专属任务 | 快速到达Aha时刻 |
-| 用户留存 | 签到、成就、等级 | 每日签到日历 | 提高替换成本(正当方式) |
-| 用户转化 | 限时优惠、稀缺提示 | 倒计时、库存提示 | 利用有限理性促进决策 |
-| 用户推荐 | 口碑分享、评价激励 | 好评返现机制 | 正和交易→自发传播 |
+> ⛔ **PRD 验证通过后，必须执行下游流转。**
 
----
+**流转目标：** `system-architect` skill（技术架构设计）或 `tech-manager` skill（开发管理）
 
-## 用户增长方法论 (User Growth Methodology)
+**流转声明模板（在对话中输出）：**
+```
+✅ PRD 全部文件已生成并通过验证。
 
-> ⚠️ **执行前必须读取 `references/user-growth-methodology.md` 获取用户增长方法论**
+📂 PRD 文件位置: docs/prd/
+📂 UI 设计文件: docs/ui/ (如有)
 
-### AARRR模型在产品设计中的应用（融合用户价值公式）
+📋 下游可消费的核心文件:
+- docs/prd/01-project-overview.md — 项目概述
+- docs/prd/L1-feature-architecture.yaml — 功能架构（AI消费）
+- docs/prd/L2-use-case-flows.yaml — 用例流（AI消费）
+- docs/prd/L3-user-stories.yaml — User Story+AC（AI消费）
+- docs/prd/validation-report.md — 验证报告
 
-| 阶段 | 目标 | 产品设计要点 | 关键指标 | 用户价值视角 |
-|------|------|--------------|----------|-------------|
-| Acquisition | 获取用户 | 落地页优化、注册流程简化 | 注册转化率 | 降低替换成本 |
-| Activation | 激活用户 | 新手引导、Aha时刻设计 | 激活率 | 快速感知新体验价值 |
-| Retention | 留存用户 | 核心价值强化、习惯养成 | 次日/7日/30日留存 | 持续提供正向用户价值 |
-| Revenue | 获取收入 | 付费点设计、价值感知 | 付费转化率、ARPU | 确保交易正和 |
-| Referral | 推荐传播 | 分享机制、病毒系数 | K因子、邀请转化 | 用户价值溢出→自发传播 |
+👉 建议下一步: 调用 system-architect skill 进行技术架构设计，
+   或调用 tech-manager skill 直接进入开发管理。
+```
 
----
+**与 system-architect 的文件映射：**
 
-## Output Files
-
-| 文件 | 路径 | 说明 |
-|------|------|------|
-| 项目概述 | `docs/prd/01-project-overview.md` | 项目背景和目标 |
-| 用户研究 | `docs/prd/02-user-research.md` | 用户研究（含用户价值分析） |
-| 竞品分析 | `docs/prd/03-competitive-analysis.md` | 竞品对标报告（含交易结构） |
-| **L1 功能架构(YAML)** | `docs/prd/L1-feature-architecture.yaml` | **功能架构图（AI消费格式）** |
-| **L1 功能架构(MD)** | `docs/prd/L1-feature-architecture.md` | **功能架构图（人类浏览）** |
-| 角色权限 | `docs/prd/05-role-permission.md` | 角色权限矩阵 |
-| 页面清单 | `docs/prd/07-page-list.md` | 完整页面清单 |
-| **L2 用例流(YAML)** | `docs/prd/L2-use-case-flows.yaml` | **用例流（AI消费格式）** |
-| **L2 用例流(MD)** | `docs/prd/L2-use-case-flows.md` | **用例流（人类浏览）** |
-| 交互规格 | `docs/prd/09-interaction-spec.md` | 交互设计说明 |
-| **L3 Story+AC(YAML)** | `docs/prd/L3-user-stories.yaml` | **User Story+验收标准（AI消费格式）** |
-| **L3 Story+AC(MD)** | `docs/prd/L3-user-stories.md` | **User Story+验收标准（人类浏览）** |
-| 验收标准汇总 | `docs/prd/13-acceptance-criteria.md` | 从L3自动生成的汇总视图 |
-| UI设计稿 | `docs/ui/[project].pen` | Pencil设计文件 |
-| 设计规范 | `docs/ui/design-system.md` | 设计规范文档 |
-| 数据指标 | `docs/prd/15-metrics-plan.md` | 数据指标计划 |
-| **验证报告** | `docs/prd/validation-report.md` | **PRD完整性验证报告** |
+| system-architect 期望的输入 | product-expert 实际输出 |
+|---------------------------|----------------------|
+| `docs/prd/01-project-overview.md` | `docs/prd/01-project-overview.md` ✅ |
+| `docs/prd/03-competitive-analysis.md` | `docs/prd/03-competitive-analysis.md` ✅ |
+| `docs/prd/L1-feature-architecture.md` | `docs/prd/L1-feature-architecture.md` ✅ |
+| `docs/prd/07-page-list.md` | `docs/prd/07-page-list.md` ✅ |
+| `docs/prd/09-interaction-spec.md` | `docs/prd/09-interaction-spec.md` ✅ |
+| `docs/prd/L2/L3` 格式文档 | `docs/prd/L2-use-case-flows.md` + `L3-user-stories.md` ✅ |
+| `docs/ui/[project].pen` | `docs/ui/[project].pen`（如有）✅ |
 
 ---
 
-## References
+## Output Files（完整统一清单）
 
-| 文档 | 用途 |
-|------|------|
-| `references/product-thinking-models.md` | **产品思维模型（腾讯+俞军核心方法论）** |
-| `references/structured-requirement-spec.md` | **L1/L2/L3 三层结构化需求模板 + AI验证规则（核心）** |
-| `references/ux-design-principles.md` | UX设计原则 |
-| `references/user-growth-methodology.md` | 用户增长方法论 |
-| `references/product-benchmark-guide.md` | 产品对标指南 |
-| `references/prd-output-template.md` | PRD输出模板 |
-| `references/ui-design-workflow.md` | UI设计工作流 |
-| `references/multi-role-design.md` | 多角色设计指南 |
-| `references/operation-strategy.md` | 运营策略融入指南 |
+> ⛔ 以下文件在 S1（新产品设计）场景下全部必须输出。S2（功能迭代）场景可按需裁剪。
+
+| # | 文件 | 路径 | 生成 Phase | 说明 |
+|---|------|------|-----------|------|
+| 1 | 项目概述 | `docs/prd/01-project-overview.md` | Phase 4 | 项目背景和目标 |
+| 2 | 用户研究 | `docs/prd/02-user-research.md` | Phase 1 | 用户研究（含用户价值公式分析） |
+| 3 | 竞品分析 | `docs/prd/03-competitive-analysis.md` | Phase 2 | 竞品对标报告（含交易结构拆解） |
+| 4 | **L1 功能架构(YAML)** | `docs/prd/L1-feature-architecture.yaml` | Phase 7 | **功能架构图（AI消费格式）** |
+| 5 | **L1 功能架构(MD)** | `docs/prd/L1-feature-architecture.md` | Phase 7 | **功能架构图（人类浏览）** |
+| 6 | 角色权限 | `docs/prd/05-role-permission.md` | Phase 4 | 角色权限矩阵 |
+| 7 | 信息架构 | `docs/prd/06-information-architecture.md` | Phase 4 | 信息架构设计 |
+| 8 | 页面清单 | `docs/prd/07-page-list.md` | Phase 4 | 完整页面清单（含三端） |
+| 9 | **L2 用例流(YAML)** | `docs/prd/L2-use-case-flows.yaml` | Phase 7 | **用例流（AI消费格式）** |
+| 10 | **L2 用例流(MD)** | `docs/prd/L2-use-case-flows.md` | Phase 7 | **用例流（人类浏览）** |
+| 11 | 交互规格 | `docs/prd/09-interaction-spec.md` | Phase 5 | 交互设计说明 |
+| 12 | 视觉风格 | `docs/prd/10-visual-style.md` | Phase 6 | 设计规范 |
+| 13 | **L3 Story+AC(YAML)** | `docs/prd/L3-user-stories.yaml` | Phase 7 | **User Story+验收标准（AI消费格式）** |
+| 14 | **L3 Story+AC(MD)** | `docs/prd/L3-user-stories.md` | Phase 7 | **User Story+验收标准（人类浏览）** |
+| 15 | 数据规格 | `docs/prd/12-data-spec.md` | Phase 7 | 数据实体定义 |
+| 16 | 验收标准汇总 | `docs/prd/13-acceptance-criteria.md` | Phase 7 | 从L3自动生成的汇总视图 |
+| 17 | 发布计划 | `docs/prd/14-release-plan.md` | Phase 7 | 灰度发布策略 |
+| 18 | 数据指标 | `docs/prd/15-metrics-plan.md` | Phase 7 | 北极星+辅助指标体系 |
+| 19 | **验证报告** | `docs/prd/validation-report.md` | Phase 8 | **PRD完整性验证报告** |
+| 20 | UI设计稿 | `docs/ui/[project].pen` | Phase 6 | Pencil设计文件（如有） |
+
+---
+
+## References（分级引用）
+
+### ⛔ 必读（Phase Gate 强制读取）
+
+| 文档 | 使用 Phase | 用途 |
+|------|-----------|------|
+| `references/structured-requirement-spec.md` | Phase 7-8 | L1/L2/L3 三层结构化需求模板 + AI验证规则 |
+| `references/prd-output-template.md` | Phase 7 | PRD输出文件模板和目录结构 |
+| `references/product-thinking-models.md` | Phase 1, 3 | 产品思维模型（用户价值公式、交易模型、Kano等核心方法论） |
+| `references/product-benchmark-guide.md` | Phase 2 | 竞品搜索策略和分析框架 |
+| `references/multi-role-design.md` | Phase 4 | 多角色（Client/Admin/运营）设计指南 |
+
+### 📖 选读（按需查阅，不强制）
+
+| 文档 | 使用 Phase | 用途 |
+|------|-----------|------|
+| `references/ux-design-principles.md` | Phase 5 | UX设计原则（深入交互设计时查阅） |
+| `references/ui-design-workflow.md` | Phase 6 | Pencil MCP 工作流（使用 Pencil 时查阅） |
+| `references/operation-strategy.md` | Phase 4 | 运营策略融入指南（设计运营模块时查阅） |
+| `references/user-growth-methodology.md` | Phase 3 | 用户增长方法论（AARRR审视MVP时查阅） |
 
 ---
 
 ## Related Skills
 
-- `business-analyst` - 商业分析（深度商业评估）
-- `prd-template` - PRD模板（标准PRD格式）
-- `prd-review` - PRD评审（PRD质量检查）
-- `rapid-prototype-workflow` - 快速原型（原型开发）
-- `test-expert` - 测试专家（产品测试）
+| Skill | 关系 | 说明 |
+|-------|------|------|
+| `system-architect` | **下游承接** | 本skill输出PRD → system-architect 进行技术架构设计 |
+| `tech-manager` | **下游承接** | 本skill输出PRD → tech-manager 调度多端开发 |
+| `business-analyst` | 上游输入 | 深度商业评估 → 本skill 融入分析结论 |
+| `prd-review` | 质量检查 | PRD质量检查（可在Phase 8后使用） |
+| `test-expert` | 远端下游 | 测试验收（由tech-manager调度） |
 
 ---
 
 ## Best Practices
 
-### 产品思维最佳实践（腾讯+俞军）
+### 产品思维（腾讯+俞军）
 
-1. **用户价值优先** - 任何需求先用用户价值公式评估，价值为负不做
-2. **做减法** - 每增加一个功能都要问"不做会怎样"，聚焦核心价值
-3. **需求真伪判断** - 用户说的 ≠ 用户要的，观察行为而非听取言语
-4. **交易正和** - 确保用户和企业都获益，不通过损害用户利益获取收益
-5. **数据驱动** - 10/100/1000法则，用数据验证直觉而非主观臆断
-6. **迭代思维** - MVP先行，灰度发布，快速验证，持续优化
-7. **边际效用** - 先做到80分，多个80分优于一个100分
-8. **全局视角** - 考虑用户异质性、情境性，多角色多场景多状态
+1. **用户价值优先** — 任何需求先用用户价值公式评估，价值为负不做
+2. **做减法** — 每增加一个功能都要问"不做会怎样"，聚焦核心价值
+3. **需求真伪判断** — 用户说的 ≠ 用户要的，观察行为而非听取言语
+4. **交易正和** — 确保用户和企业都获益，不通过损害用户利益获取收益
+5. **数据驱动** — 10/100/1000法则，用数据验证而非主观臆断
+6. **迭代思维** — MVP先行，灰度发布，快速验证，持续优化
+7. **边际效用** — 先做到80分，多个80分优于一个100分
+8. **全局视角** — 考虑用户异质性、情境性，多角色多场景多状态
 
-### 产品决策最佳实践
+### PRD输出
 
-1. **权衡取舍** - 没有完美方案，只有最优权衡
-2. **机会成本** - 做一个功能意味着放弃做其他功能的机会
-3. **用户分层** - 不为边缘用户牺牲核心用户体验
-4. **场景优先** - 关注使用场景而非用户标签
-5. **有限理性** - 简化决策路径，提供默认选项，减少认知负担
+1. **三层必须完整** — L1/L2/L3 缺一不可，每层同时输出 YAML + Markdown
+2. **ID 全局唯一** — Feature/UseCase/Story/AC 的 ID 在整个 PRD 中唯一
+3. **交叉引用闭环** — Feature → UseCase → Story → AC 链路完整，无断链
+4. **AC 可观测** — Given-When-Then 的 Then 必须是可观测/可度量的结果
+5. **验证必须通过** — Phase 8 验证报告无 ❌ ERROR 项才可交付
+6. **面向 AI Agent** — 所有输出假设读者是 AI，结构化优先于可读性
 
-### UI设计最佳实践
+---
 
-1. **一致性** - 保持视觉和交互的一致性
-2. **层次感** - 信息有主次，视觉有层级
-3. **可用性** - 易学易用，减少认知负担（有限理性）
-4. **可访问性** - 考虑不同用户群体的需求（异质性）
-5. **让功能找用户** - 场景触发、智能推荐、渐进披露
+## ⛔ Execution Reminder (CRITICAL — Agent 最后检查)
 
-### PRD输出最佳实践
+**在结束整个 Skill 执行前，Agent 必须自检：**
 
-1. **三层必须完整** - L1/L2/L3 缺一不可，每层同时输出 YAML + Markdown
-2. **ID 全局唯一** - Feature/UseCase/Story/AC 的 ID 在整个 PRD 中唯一
-3. **交叉引用闭环** - Feature → UseCase → Story → AC 链路完整，无断链
-4. **AC 可观测** - Given-When-Then 的 Then 必须是可观测/可度量的结果
-5. **验证必须通过** - Phase 8 验证报告无 ❌ ERROR 项才可交付
-6. **面向 AI Agent** - 所有输出假设读者是 AI，结构化优先于可读性
-7. **灰度策略** - 包含灰度发布和AB测试计划
-8. **可度量** - 每个功能都有对应的数据指标
+```
+✅ 自检清单:
+1. Phase 0 场景已识别？
+2. Phase 1 用户研究文件已写入 docs/prd/？
+3. Phase 2 使用了 search_web 真实搜索？竞品分析文件已写入？
+4. Phase 3 后 MANDATORY PAUSE 执行了？用户已批准 MVP？
+5. Phase 4 输出了 4 个文件（01, 05, 06, 07）？Phase 5/6 输出了交互(09)和视觉(10)规范？
+6. Phase 7 输出了 10 个文件（L1/L2/L3 共 6 个 + 数据12/验收13/发布14/指标15）？
+7. Phase 8 验证报告已写入？无 ❌ ERROR？
+8. 下游流转声明已输出？
+
+❌ 任何一项为否 → 回到对应 Phase 补充执行
+✅ 全部为是 → Skill 执行完成
+```
+

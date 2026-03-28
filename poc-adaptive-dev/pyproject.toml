@@ -1,0 +1,14 @@
+[project]
+name = "poc-adaptive-dev"
+version = "0.1.0"
+description = "A simple python hello world command line tool"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+]

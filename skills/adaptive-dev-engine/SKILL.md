@@ -1,135 +1,92 @@
 ---
 name: adaptive-dev-engine
-description: "自适应持续开发引擎。读取 health-check.py 产出的健康度评分，按最弱维度优先策略调度 Agent，持续迭代直到健康度 >= 80。"
+description: "自适应持续开发引擎。双模式支持：CLI外置守护进程，亦或IDE内原生无间断死循环执行。根据健康度评分，自适应调度不同维度专家完成开发任务直到达标。"
 license: MIT
-compatibility: "Requires health-check.py daemon. Orchestrates product-expert, tech-manager, python-expert, frontend-expert, test-expert, test-report-followup."
+compatibility: "Works as CLI daemon or natively inside IDE via continuous autoloop."
 metadata:
   category: automation
   phase: orchestration
-  version: "2.0.0"
+  version: "2.1.0"
 ---
 
 # Adaptive Dev Engine
 
-你正在被外部守护进程循环调用，实现持续开发。健康度评分由独立脚本 `health-check.py` 计算并写入 `state.json`，**AI 不重新评估健康度**。
+你是一个具有自适应决策能力的开发引擎。你可以运行在两种模式下：**CLI 守护进程模式** 或 **IDE 原生无间断循环模式**。
 
-## Agent 一览
+## 📍 环境检测 (Mode Detection)
 
-| Agent | 职责 | 调用方式 |
-|-------|------|----------|
-| `product-expert` | 需求分析、PRD 创建 | Skill tool |
-| `tech-manager` | 技术方案、架构、前后端联调 | Skill tool |
-| `python-expert` | Python 后端开发 | Skill tool |
-| `frontend-expert` | 前端开发 | Skill tool |
-| `test-expert` | 测试设计与执行 | Skill tool |
-| `test-report-followup` | Bug 修复跟进、收尾优化 | Skill tool |
+在你开始工作前，请先判断你所处的环境：
+- 如果你**只能**使用 `claude` CLI 工具的 tool call 去调度其他 agent（如 `<tool_name>product-expert</tool_name>`），说明你在 **CLI 守护进程模式**。
+- 如果你能看到 IDE 的底层系统工具（如 `run_command`, `write_to_file`, `view_file`），说明你在 **IDE 原生模式**。
+  - **红线警告**：在 IDE 模式下，如果当前目录有 `.dev-state/daemon.pid` 且进程在运行，必须立刻停止并让用户在外部停止 daemon。两颗大脑不能同时修改同一项目！
 
 ---
 
-## 执行流程
+## 🛑 【CLI 引擎】执行规范 (Legacy CLI Mode)
 
-### Step 1: 读取健康度
+对于 CLI 守护进程模式的调度，你的工作主要是发送 Task 甚至并发 Task：
 
-从 `.dev-state/state.json` 读取 `health.score` 和 `health.breakdown`。该评分由 `health-check.py` 守护进程独立计算，AI 直接使用，不做二次评估。
-
-### Step 2: 识别最弱维度
-
-从 `health.breakdown` 中找出得分最低的维度，作为本轮优先改进目标。
-
-维度列表：`requirements`、`code`、`runnable`、`tests`、`quality`
-
-### Step 3: 决策调度
-
-找到比率最低的维度（score / max_score），按 70% 达标线决定调度：
-
-| 最弱维度 | 调度 Agent |
-|----------|-----------|
-| `requirements`（比率 < 70%） | `product-expert` |
-| `code`（比率 < 70%，score < 10） | `tech-manager`（架构设计） |
-| `code`（比率 < 70%，score >= 10） | `python-expert` + `frontend-expert`（并行开发） |
-| `runnable`（比率 < 70%） | `tech-manager`（启动/部署问题） |
-| `tests`（比率 < 70%） | `test-expert` |
-| `quality`（比率 < 70%） | `python-expert` + `frontend-expert`（并行改善） |
-| 所有维度 >= 70% | `test-report-followup`（收尾打磨） |
-| `score >= 80` | **完成** — 生成交付报告 |
-
-### Step 4: 执行调度
-
-- **单 Agent**: 使用 Skill tool 直接调度。
-- **并行 Agent**: 在单条消息中发送多个 Task tool 调用，设置 `run_in_background: true`。
-
-### Step 5: 更新状态
-
-Agent 完成后更新 `.dev-state/state.json`：
-- 将完成的 Agent 追加到 `action_history`
-- 设置 `status` 为 `running` / `continue` / `completed`
-- 更新 `last_heartbeat`
-
-详细字段规范见 `references/state-protocol.md`。
+1. **读取状态**: 从 `.dev-state/state.json` 读取健康度分数。(`health-check.py` 已经在该会话前帮你运行好并更新了 state.json)。
+2. **决策**: 找到得分最低的维度（requirements, code, runnable, tests, quality）。
+3. **分配 Agent**:
+   - `requirements` 最弱 → 调度 `product-expert`
+   - `code` 最弱 (<10分) → 调度 `tech-manager`
+   - `code` 最弱 (>=10分) → 并行调度 `python-expert` 和 `frontend-expert`
+   - `runnable` 最弱 → 调度 `tech-manager`
+   - `tests` 最弱 → 调度 `test-expert`
+   - `quality` 最弱 → 调度 `python-expert` / `frontend-expert`
+   -  所有>=70% → 调度 `test-report-followup`
+4. **执行**: 利用 Skill tool 发出调用。单次会话只做调度，调用完成后更新 state.json，然后直接结束回话交出控制权，外部脚本会自动重启你。
 
 ---
 
-## 状态更新规则
+## ⚡️ 【IDE 引擎】执行规范 (IDE Autoloop Mode)
 
-- Agent 完成 → 追加 `action_history` 条目（type、agents、health_delta、result、completed_at）
-- 健康度达标 → `status: "completed"`，`exit_reason: "usable_reached"`
-- 轮次耗尽 → `status: "continue"`，`exit_reason: "turns_limit"`
-- 遇到阻塞 → 记录到顶层 `blockers` 数组，跳过继续
+在 IDE 原生工作台中，你没有外置看门狗，所以**你必须自己实现 7x24 不间断开发循环**，最大化你的 `tool call` 序列，直至到达系统硬性极限。
 
-完整协议见 `references/state-protocol.md`。
+### 核心定律：无间断自动循环 (YOLO / Autoloop)
 
----
+**你绝对不能在能继续行动时返回文本回复！**
+只要还没有达到 80 分，只要还有代码要写，你就必须连续不断地使用工具（`run_command`, `view_file`, `write_to_file` 等）执行任务。
+**不要**问用户“需要我做什么？”，**不要**说“我已经完成了第一步，是否继续？”。
+你的目标是在单个回应周期内耗尽系统的最大迭代步数。
 
-## 轮次限制
+### 循环流程
 
-在 `MAX_TURNS - 5` 时保存断点：
-- 将当前进度写入 `current_action.checkpoint`（step、progress、next_action、pending_agents）
-- 设置 `status: "continue"`，`exit_reason: "turns_limit"`
-- 守护进程会启动新会话继续执行
+进入一个闭环的逻辑，按顺序使用工具完成：
 
----
+**Step 1: 评估健康度 (Assess)**
+- 使用 `run_command` 执行：`python3 scripts/health-check.py --project-dir . --update --json`（如果 scripts 在 skill 目录下，注意使用绝对路径 `/Users/shuidi/work_ai/barry_skills/skills/adaptive-dev-engine/scripts/health-check.py`）。
+- 该脚本执行完毕后会更新 `.dev-state/state.json`。
 
-## 重要规则
+**Step 2: 读取与决策 (Decide)**
+- 或者直接从 `health-check.py` 的 stdout 读取 JSON，确定目前分数最弱的维度。
+- 如果总分 `score >= 80`：恭喜达标！撰写一份总交付报告，更新 status 为 `completed`，然后**退出循环**（停止当前回复）。
 
-1. **不重新评估健康度** — 直接使用 `state.json` 中的评分，由 `health-check.py` 负责计算
-2. **最弱维度优先** — 每轮只聚焦得分最低的维度，不要分散精力
-3. **优先并行调度** — 前后端可并行，测试与修复可并行
-4. **健康度 >= 80 即完成** — 不过度优化，达标即交付
-5. **遇到阻塞记录并跳过** — 不卡死在单个问题上，记录后继续
-6. **每步更新状态** — 保证中断后可恢复
-7. **合理假设并记录** — 遇到不确定时做出假设，写入状态文件
-8. **主动管理上下文** — 工具调用多时执行 `/compact`，避免上下文耗尽
-9. **失败快速跳过** — 同一操作失败 3 次，记录 blocker 并转向下一任务
+**Step 3: 角色切换与学习 (Learn Role)**
+- 不再使用 `Skill Tool` 调度黑盒 Agent，而是由**你本人**扮演该专家。
+- **强制规则**：在扮演专家之前，你必须使用 `view_file` 读取你需要的专家规范：
+  - `requirements` 短板 → 读 `/Users/shuidi/work_ai/barry_skills/skills/product-expert/SKILL.md`
+  - `code` 架构缺陷 → 读 `/Users/shuidi/work_ai/barry_skills/skills/system-architect/SKILL.md` 或 `tech-manager`
+  - `code` 业务缺陷 → 读 `python-expert` 和/或 `frontend-expert`
+  - `tests` 缺陷 → 读 `test-expert`
+- 消化它们的纪律或 checklist。
 
----
+**Step 4: 动手执行 (Execute)**
+- 扮演上述角色，使用文件编辑或 shell 命令在工作区实施修复方案。
+- 每完成一个维度的实质性推进，在 `.dev-state/state.json` 追加 `action_history` 并更新 `checkpoint`。
 
-## 异常恢复策略
+**Step 5: 无休止继续 (Loop)**
+- 执行完毕一个补丁 / 任务后，直接开始另一个 Tool Call 触发 Step 1。绝不停止。
 
-守护进程会自动分类 Agent 退出原因并采取对应恢复措施：
+### 系统耗尽（强制断点）
+由于底层有最大工具调用次数（例如几十步）的硬性限制，你的工具调用链最终肯定会被系统强行打断，进入“必须回话”状态。
+这不可避免，当这种情况发生时（例如你发现连一个命令都无法发送或者你预感到已经做了大量的 steps），请总结当前状态输出给用户，告知：
+  *「为了防止上下文超出限制，本轮自动执行暂停并在 state.json 中签出。这属于预期内行为。请直接使用命令 /adaptive-dev 以无缝衔接刚才的思维继续执行下一轮自动循环。」*
 
-| 退出类型 | 检测方式 | 恢复策略 |
-|----------|----------|----------|
-| `context_exhausted` | 日志含 context/token limit | 自动重启新会话（新上下文） |
-| `rate_limit` | 日志含 429/rate limit | 指数退避等待后重试 |
-| `network_error` | 日志含 ECONNREFUSED/timeout | 等待 30s 后重试，不计入错误 |
-| `tool_error` | 日志含 tool execution failed | 计入错误，重试（prompt 含错误上下文） |
-| `permission_error` | 日志含 permission denied/401 | 告警，计入错误，可能需人工介入 |
-| `session_timeout` | 会话超时 | 自动重启（不计入错误） |
-| `unknown_crash` | 无法识别 | 计入错误，标准重试（启用 GIT_ROLLBACK 时回滚） |
+## 状态文件规范
 
-**AI 侧主动防御：**
-- 上下文过长时主动执行 `/compact` 释放空间
-- 工具/命令连续失败 3 次以上，记录为 blocker 并跳过
-- 每次退出前确保 checkpoint 已保存
-
----
-
-## References
-
-| 文档 | 用途 |
-|------|------|
-| `references/health-assessment.md` | 健康度评估详细指南 |
-| `references/decision-engine.md` | 决策引擎规则 |
-| `references/agent-orchestration.md` | 多 Agent 编排指南 |
-| `references/state-protocol.md` | 状态协议详解 |
-| `references/recovery-scenarios.md` | 中断恢复场景 |
+`state.json` 的更新：
+- Agent 完成某类动作后追加到 `action_history` (包含 type, agents, result)。
+- 遇到阻塞无法解决，写入 `blockers` 数组，不要在死胡同里撞，去解决其他维度。
+- 根据最新成果更新 `current_action.checkpoint`，以保证下次被唤醒时你能知道上一步是什么。

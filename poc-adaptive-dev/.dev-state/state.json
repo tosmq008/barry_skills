@@ -1,0 +1,71 @@
+{
+  "version": "2.0.0",
+  "project": {
+    "name": "poc-adaptive-dev",
+    "path": "/Users/shuidi/work_ai/barry_skills/poc-adaptive-dev",
+    "type": "unknown",
+    "created_at": "2026-03-27T06:28:56Z"
+  },
+  "health": {
+    "score": 41,
+    "breakdown": {
+      "requirements": 15,
+      "code": 5,
+      "tests": 5,
+      "runnable": 10,
+      "quality": 6
+    },
+    "details": {
+      "requirements": "0 PRD docs, PRD.md=True",
+      "code": "2 files (minimal)",
+      "tests": "1 test file",
+      "runnable": "Has deps + entry point",
+      "quality": "Linter not available, default"
+    },
+    "usable": false,
+    "target": 80,
+    "assessed_at": "2026-03-27T06:31:04Z",
+    "history": [
+      {
+        "timestamp": "2026-03-27T06:29:07Z",
+        "score": 6
+      },
+      {
+        "timestamp": "2026-03-27T06:29:33Z",
+        "score": 21
+      },
+      {
+        "timestamp": "2026-03-27T06:30:15Z",
+        "score": 36
+      },
+      {
+        "timestamp": "2026-03-27T06:31:04Z",
+        "score": 41
+      }
+    ],
+    "delta": 5
+  },
+  "status": "ready",
+  "exit_reason": null,
+  "current_action": null,
+  "agent_coordination": {
+    "active_agents": [],
+    "completed_agents": [],
+    "pending_sync": false
+  },
+  "action_history": [],
+  "decision_log": [],
+  "blockers": [],
+  "errors": [],
+  "sessions": {
+    "count": 0,
+    "total_turns": 0,
+    "current_session": null
+  },
+  "last_heartbeat": "2026-03-27T06:31:04Z",
+  "metrics": {
+    "total_duration_seconds": 0,
+    "parallel_executions": 0,
+    "avg_health_delta_per_session": 0
+  }
+}

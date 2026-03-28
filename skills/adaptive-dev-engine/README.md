@@ -4,144 +4,100 @@
 
 ## 核心特性
 
+- **双引擎架构**: 支持独立的 `CLI 守护进程模式`，或者与环境集成的 `IDE 原生模式`。
 - **健康度评分系统**: 0-100 分量化项目状态，≥80 分即可用
 - **智能决策引擎**: 根据健康度和问题类型动态决定下一步行动
-- **多 Agent 并行调度**: 前后端并行开发，测试修复并行执行
+- **多 Agent 调度或角色扮演**: 在 CLI 模式下作为上游控制器调度子进程；在 IDE 模式下直接读取各专家规则自我迭代。
+- **无间断自动循环**: 支持在 IDE 对话框内进行 `YOLO / Autoloop` 的零打扰闭环。
 - **自动断点恢复**: 支持轮次限制、进程崩溃、限流等场景的自动恢复
-- **7×24 持续运行**: 守护进程自动管理会话生命周期
 
-## 可调度的 Agent
+## 可调度的角色 (专家体系)
 
-| Agent | 职责 |
+| Agent 角色 | 职责 |
 |-------|------|
 | `product-expert` | 产品设计、PRD、UI原型 |
-| `tech-manager` | 技术协调、前后端联调 |
-| `python-expert` | Python后端开发 |
-| `frontend-expert` | 前端开发 |
-| `test-expert` | 测试设计与执行 |
-| `test-report-followup` | Bug修复跟进 |
+| `tech-manager` | 技术协调、系统架构联调 |
+| `python-expert` | Python/后端底层架构开发 |
+| `frontend-expert` | 前端组件、UI实现开发 |
+| `test-expert` | 编写/执行 E2E、集成、单元覆盖率 |
+| `test-report-followup` | Bug修复跟进、收尾质量提升 |
 
 ## 快速开始
 
-### macOS / Linux
+### 【模式 A】IDE 原生无间断模式 (推荐用于现代大模型工作台)
 
+1. 在 IDE 的对话框中，输入以下 Slash Command：
+   `/adaptive-dev`
+2. AI 会自动进入**死循环状态**（不会每一小步都来麻烦你，会自动分析健康度 -> `执行方案` -> `分析最新健康度` -> `执行下一项`... ）。
+3. 任何时刻如果你觉得 AI 做得差不多了，系统强制其输出最新状态，你可以直接回复“继续” 或重新跑 `/adaptive-dev` 衔接。
+
+**防撞车警告**:
+使用 IDE 原生触发开发前，如果你的项目根目录有 CLI 生成的 `.dev-state/daemon.pid`，说明外置 Bash 脚本还在跑。请务必先停止它（保证不会多机同时写同一个 json）。
+
+---
+
+### 【模式 B】旧版 CLI 守护进程模式
+
+适用于非大模型 IDE 环境。它由一个死循环守护 Bash 处理上下文切分并交还给 Claude CLI。
+
+**macOS / Linux**
 ```bash
-# 复制脚本到 PATH
 cp scripts/adaptive-dev ~/.local/bin/
 chmod +x ~/.local/bin/adaptive-dev
 
-# 或创建软链接
-ln -s $(pwd)/scripts/adaptive-dev ~/.local/bin/adaptive-dev
-
-# 使用
 adaptive-dev start "一个待办事项App，支持增删改查"
-adaptive-dev status
+adaptive-dev logs
 adaptive-dev stop
 ```
 
-### Windows (PowerShell)
-
+**Windows (PowerShell)**
 ```powershell
-# 复制脚本到项目目录或 PATH
 Copy-Item scripts\adaptive-dev.ps1 $env:USERPROFILE\.local\bin\
-
-# 使用 (在项目目录下运行)
 .\adaptive-dev.ps1 start "一个待办事项App，支持增删改查"
-.\adaptive-dev.ps1 status
-.\adaptive-dev.ps1 stop
-
-# 或者设置别名
-Set-Alias adaptive-dev "$env:USERPROFILE\.local\bin\adaptive-dev.ps1"
 ```
 
-### 命令说明
+## 健康度与决策流程
 
-| 命令 | 说明 |
-|------|------|
-| `start [需求]` | 启动持续开发 |
-| `status` | 查看状态 |
-| `logs` | 实时日志 |
-| `pause` | 暂停 |
-| `stop` | 停止 |
-| `reset` | 重置 |
-
-## 健康度评分
-
-| 维度 | 分值 | 说明 |
-|------|------|------|
-| 需求清晰度 | 0-20 | PRD完整性 |
-| 代码完整度 | 0-25 | 功能实现程度 |
-| 测试覆盖度 | 0-20 | 测试用例覆盖 |
-| 可运行性 | 0-20 | 能否正常启动 |
-| 代码质量 | 0-15 | 代码规范程度 |
+```
+健康度评估表：
+0-20  (PRD完整性)
+0-25  (功能实现程度)
+0-20  (可运行性/部署情况) 
+0-20  (测试用例覆盖比率)
+0-15  (代码质量及Lint警告)
+```
 
 **可用状态: 总分 ≥ 80**
 
-## 决策流程
-
 ```
-健康度 < 20  → product-expert (需求分析)
-健康度 20-40 → tech-manager (技术设计)
-健康度 40-60 → python-expert + frontend-expert (并行开发)
-健康度 60-75 → test-expert + 修复 (边测边修)
-健康度 75-80 → test-report-followup (收尾优化)
-健康度 ≥ 80  → 完成！
+自适应流向：
+极弱 requirements   → product-expert 
+较弱 code           → tech-manager 或 python-expert + frontend-expert 
+弱 runnable         → 修复启动框架 
+低 tests 取值       → test-expert 
+极差 quality        → linter 自动修改 
 ```
 
 ## 目录结构
 
 ```
 adaptive-dev-engine/
-├── SKILL.md                      # 主 Skill 文件
+├── SKILL.md                      # 主 Skill 调度与多代理定义
 ├── README.md                     # 本文件
 ├── scripts/
-│   ├── adaptive-dev              # 守护进程脚本 (Bash - macOS/Linux)
-│   └── adaptive-dev.ps1          # 守护进程脚本 (PowerShell - Windows)
+│   ├── adaptive-dev              # 守护进程脚本 (Bash - CLI Mode)
+│   ├── adaptive-dev.ps1          # 守护进程脚本 (PowerShell - CLI Mode)
+│   ├── health-check.py           # 独立的评分算法 (共用)
+│   └── init-state.py             # IDE Mode 无容错初始化状态脚本
 └── references/
-    ├── health-assessment.md      # 健康度评估指南
     ├── decision-engine.md        # 智能决策引擎
-    ├── agent-orchestration.md    # 多Agent编排指南
     ├── state-protocol.md         # 状态协议详解
-    └── recovery-scenarios.md     # 中断恢复场景
+    └── ...                       # 其他参考规则
 ```
-
-## 状态文件
-
-运行时会在项目目录创建 `.dev-state/` 目录：
-
-```
-.dev-state/
-├── state.json          # 主状态文件
-├── requirement.txt     # 原始需求
-├── logs/               # 会话日志
-├── checkpoints/        # 断点备份
-└── locks/              # 文件锁
-```
-
-## 环境变量
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `CLAUDE_MODEL` | claude-sonnet-4-20250514 | 使用的模型 |
-| `SKILL_DIR` | `~/.claude/skills/adaptive-dev-engine` | Skill 目录路径 |
-
-## 系统要求
-
-| 平台 | 要求 |
-|------|------|
-| macOS/Linux | Bash, Python 3, claude CLI |
-| Windows | PowerShell 5.1+, Python 3, claude CLI |
 
 ## 与其他 Skill 的关系
 
-本 Skill 作为编排层，动态调度以下 Skill：
-
-- `product-expert` - 产品设计
-- `tech-manager` - 技术协调
-- `python-expert` - 后端开发
-- `frontend-expert` - 前端开发
-- `test-expert` - 测试执行
-- `test-report-followup` - Bug修复
+本 Skill 作为最高编排层，会在运行时自动引用子专家 Skill 的指令执行实际操作。这种模块化解耦可以在不修改核心循环的情况下单独升级某个专家引擎的能力。
 
 ## License
 

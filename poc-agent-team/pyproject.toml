@@ -1,0 +1,5 @@
+[project]
+name = "poc-agent-team"
+version = "0.1.0"
+description = "Agent Team system."
+dependencies = ["fastapi", "uvicorn"]

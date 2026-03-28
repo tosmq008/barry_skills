@@ -39,14 +39,20 @@ Adaptive Dev Engine（自适应持续开发引擎）是一个智能化的 7×24 
 
 ### 系统要求
 
-| 平台 | 要求 |
-|------|------|
-| macOS/Linux | Bash, Python 3, claude CLI |
-| Windows | PowerShell 5.1+, Python 3, claude CLI |
+| 模式 | 平台 | 要求 |
+|------|------|------|
+| **IDE 原生模式** | Any | Gemini, Antigravity, cline 等具备 Workspace 和 Tool 调度能力的现代大模型 IDE。 |
+| **CLI 模式** | macOS/Linux | Bash, Python 3, claude CLI |
+| **CLI 模式** | Windows | PowerShell 5.1+, Python 3, claude CLI |
 
 ### 安装步骤
 
-#### macOS / Linux
+#### 模式 A：在 IDE 中（推荐）
+
+只需确保你的 IDE Workspace 包含本 skill 目录（`adaptive-dev-engine`）。  
+在 IDE 对话框随时可使用 `/adaptive-dev` 指令唤起。
+
+#### 模式 B：命令行 CLI 宏 (macOS / Linux)
 
 ```bash
 # 方式1: 复制到 PATH
@@ -60,7 +66,7 @@ ln -s /path/to/adaptive-dev-engine/scripts/adaptive-dev ~/.local/bin/adaptive-de
 adaptive-dev help
 ```
 
-#### Windows (PowerShell)
+#### 模式 B：命令行 CLI 宏 (Windows PowerShell)
 
 ```powershell
 # 复制脚本
@@ -68,28 +74,29 @@ Copy-Item scripts\adaptive-dev.ps1 $env:USERPROFILE\.local\bin\
 
 # 设置别名 (可选，添加到 $PROFILE)
 Set-Alias adaptive-dev "$env:USERPROFILE\.local\bin\adaptive-dev.ps1"
-
-# 验证安装
-.\adaptive-dev.ps1 help
 ```
 
-### 环境变量
+### 环境变量 (仅限 CLI 模式)
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `CLAUDE_MODEL` | `claude-sonnet-4-20250514` | 使用的 Claude 模型 |
 | `SKILL_DIR` | `~/.claude/skills/adaptive-dev-engine` | Skill 文件目录 |
 
-```bash
-# 示例：使用 Opus 模型
-CLAUDE_MODEL=claude-opus-4-20250514 adaptive-dev start "我的项目"
-```
-
 ---
 
 ## 快速开始
 
-### 场景1：从零开始新项目
+### 【首选】使用 IDE 原生无缝模式 
+
+在你的大模型工作流输入框，直接键入：
+
+```
+/adaptive-dev "我需要一个带登陆系统的贪吃蛇游戏网页版"
+```
+AI 将会从头到尾接管设计、编写代码、测试和自动运行直到完成。期间尽量不要打断它。
+
+### 场景1：CLI CLI 从零开始新项目
 
 ```bash
 # 1. 创建项目目录
@@ -105,7 +112,7 @@ adaptive-dev status
 adaptive-dev logs
 ```
 
-### 场景2：继续已有项目
+### 场景2：CLI 继续已有项目
 
 ```bash
 # 进入已有项目目录
@@ -113,14 +120,9 @@ cd existing-project
 
 # 直接启动（无需提供需求，会自动分析）
 adaptive-dev start
-
-# 系统会自动：
-# - 分析现有代码结构
-# - 评估健康度
-# - 决定下一步行动
 ```
 
-### 场景3：暂停和恢复
+### 场景3：CLI 暂停和恢复
 
 ```bash
 # 暂停开发（当前会话完成后生效）

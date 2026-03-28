@@ -1,18 +1,62 @@
 ---
 name: test-expert
-description: "This skill enables comprehensive software testing as a QA expert with multi-agent orchestration capability. It analyzes PRD and technical documents to design test strategies, dispatches specialized sub-agents to execute different test types in parallel (unit, integration, black-box, UI automation with Playwright), record bugs with reproduction steps and screenshots, and generate versioned test reports. After report generation, it automatically hands off to test-report-followup skill for issue tracking and resolution. It supports regression testing by reviewing previous test reports and re-verifying all items. It also identifies product gaps by comparing with industry standards and competitor products."
+description: "This skill enables comprehensive, rigorous software testing as a QA expert with multi-agent orchestration capability. It enforces strict anti-fabrication rules (every result must have execution evidence), per-test-type environment verification, and STOP-and-escalate protocols. It analyzes PRD and technical documents to design test strategies, dispatches specialized sub-agents to execute different test types in parallel (unit, integration, black-box, UI automation with Playwright), records bugs with mandatory quality self-check, and generates versioned test reports with automated release recommendations. After report generation, it automatically hands off to test-report-followup skill for issue tracking and resolution. It supports regression testing and identifies product gaps by comparing with industry standards."
 license: MIT
 compatibility: "Requires Playwright for UI automation testing. Supports Python pytest, JavaScript/TypeScript testing frameworks. Works with any web application. Supports multi-agent orchestration for parallel test execution. Integrates with test-report-followup skill for issue tracking."
 metadata:
   category: quality-assurance
   phase: testing
-  version: "1.3.0"
+  version: "2.1.0"
 allowed-tools: bash read_file write_file mcp playwright
 ---
 
 # Test Expert Skill
 
-作为测试专家（测试总监角色），系统性地进行软件质量保障工作，通过调度多个专业 Agent 并行执行测试任务，从需求分析到测试执行再到报告生成的完整测试流程。测试报告生成后，自动唤起测试报告跟进专家进行问题跟进。
+作为测试专家（测试总监角色），以最高标准系统性地进行软件质量保障工作。通过调度多个专业 Agent 并行执行测试任务，从需求分析到测试执行再到报告生成的完整测试流程。测试报告生成后，自动唤起测试报告跟进专家进行问题跟进。
+
+---
+
+## 🚨 铁律：禁止虚报测试结果（Anti-Fabrication Rules）
+
+> ⛔ **以下规则具有最高优先级，违反任何一条即视为测试流程无效**
+
+### 铁律 1：无执行证据，不得报告结果
+
+> ⛔ **每一条标记为 Pass/Fail 的测试用例，必须有可追溯的执行证据。没有执行的用例只能标记为 `Not Executed` 或 `Blocked`，绝不允许虚构 Pass/Fail 结果。**
+
+| 状态 | 含义 | 必须的证据 |
+|------|------|------------|
+| Pass | 用例执行通过 | 命令行输出/日志/截图 中至少 1 项 |
+| Fail | 用例执行失败 | 命令行输出/日志/截图/错误信息 中至少 1 项 |
+| Blocked | 因环境/依赖问题无法执行 | 阻塞原因描述 + 尝试执行的错误信息 |
+| Not Executed | 未执行 | 标注未执行原因（环境不满足/时间不足/依赖缺失） |
+| Skipped | 本次不适用 | 标注跳过原因 |
+
+**严禁行为清单：**
+- ❌ 在报告中填写 "Pass" 但实际未运行该用例
+- ❌ 将 Phase 2 设计的用例数直接作为 Phase 3 的执行数
+- ❌ 估算/推测测试结果（如 "根据代码推断应该通过"）
+- ❌ 使用其他版本/环境的测试结果代替当前环境的结果
+- ❌ 将 Blocked/Not Executed 的用例计入通过率分母
+
+### 铁律 2：通过率计算必须基于实际执行
+
+```
+通过率 = 实际执行通过数 / 实际执行总数 × 100%
+
+实际执行总数 = Pass + Fail（不含 Blocked / Not Executed / Skipped）
+```
+
+> ⛔ **Blocked/Not Executed/Skipped 用例不得计入通过率的分子或分母。必须单独统计并在报告中明确标注。**
+
+### 铁律 3：报告数据必须与执行日志交叉验证
+
+| 交叉验证项 | 验证方式 | 不匹配处理 |
+|-----------|----------|------------|
+| 执行用例数 vs 报告用例数 | 对比 pytest/playwright 输出的 collected items 数 | ⛔ 修正报告数据 |
+| Pass 数 vs 日志 passed 数 | 对比测试框架输出的 passed 计数 | ⛔ 以日志为准 |
+| Fail 数 vs 日志 failed 数 | 对比测试框架输出的 failed 计数 | ⛔ 以日志为准 |
+| Bug 数 vs Fail 用例数 | 每个 Fail 必须有对应 Bug | ⚠️ 补充缺失 Bug |
 
 ## When to Use
 
@@ -557,6 +601,107 @@ docs/test/
 
 ## Phase 3: 测试执行 (Test Execution)
 
+### 3.0 执行前环境验证（⛔ 强制）
+
+> ⛔ **必须按测试类型逐一验证环境。环境不通过的测试类型标记为 BLOCKED，禁止为其虚构结果。**
+> ⛔ **不适用的检查项标记 N/A 并说明原因。**
+
+#### 3.0.1 分类型环境验证表
+
+```markdown
+## 环境验证记录
+
+### 后端单元测试环境
+| 检查项 | 检查命令 | 预期结果 | 实际结果 | 状态 |
+|--------|----------|----------|----------|------|
+| Python 可用 | `python --version` | 版本号输出 | [实际] | ✅/❌ |
+| venv 可激活 | `source .venv/bin/activate` | 无错误 | [实际] | ✅/❌ |
+| pytest 可用 | `pytest --version` | 版本号输出 | [实际] | ✅/❌ |
+| 依赖已安装 | `pip check` | 无冲突 | [实际] | ✅/❌ |
+| **环境结论** | | | | ✅ EXECUTABLE / ❌ BLOCKED |
+
+### 后端集成测试环境
+| 检查项 | 检查命令 | 预期结果 | 实际结果 | 状态 |
+|--------|----------|----------|----------|------|
+| 后端服务可启动 | `uvicorn main:app` | 服务启动 | [实际] | ✅/❌ |
+| API 健康检查 | `curl http://localhost:8000/health` | 200 OK | [实际] | ✅/❌ |
+| 数据库连接 | 执行查询测试 | 返回结果 | [实际] | ✅/❌/N/A |
+| **环境结论** | | | | ✅ EXECUTABLE / ❌ BLOCKED |
+
+### 前端 UI 自动化测试环境
+| 检查项 | 检查命令 | 预期结果 | 实际结果 | 状态 |
+|--------|----------|----------|----------|------|
+| Node.js 可用 | `node --version` | 版本号输出 | [实际] | ✅/❌ |
+| npm/npx 可用 | `npx --version` | 版本号输出 | [实际] | ✅/❌ |
+| Playwright 已安装 | `npx playwright --version` | 版本号输出 | [实际] | ✅/❌ |
+| 前端服务可访问 | `curl http://localhost:3000` | 200 OK | [实际] | ✅/❌ |
+| 浏览器已安装 | `npx playwright install --dry-run` | 已安装 | [实际] | ✅/❌ |
+| **环境结论** | | | | ✅ EXECUTABLE / ❌ BLOCKED |
+```
+
+#### 3.0.2 可执行范围评估（⛔ 强制）
+
+> ⛔ **根据环境验证结果，明确本次测试的实际可执行范围。BLOCKED 类型的用例数不计入执行计划。**
+
+```markdown
+## 可执行范围评估
+
+| 测试类型 | 环境状态 | Phase 2 设计用例数 | 本次可执行数 | 阻塞原因 |
+|----------|---------|-------------------|-------------|----------|
+| 单元测试 | ✅ EXECUTABLE | [n] | [n] | - |
+| 集成测试 | ❌ BLOCKED | [n] | 0 | [具体原因] |
+| 黑盒测试 | ✅ EXECUTABLE | [n] | [n] | - |
+| UI 自动化 | ❌ BLOCKED | [n] | 0 | [具体原因] |
+| **总计** | | [设计总数] | [实际可执行总数] | |
+
+### 可执行率
+可执行率 = 实际可执行数 / 设计总数 × 100% = [%]
+```
+
+#### 3.0.3 STOP-AND-ESCALATE 协议（⛔ 强制）
+
+> ⛔ **当可执行率 < 50% 时，必须执行 STOP-AND-ESCALATE 协议，禁止继续推进到报告生成！**
+
+```
+IF 可执行率 < 50%:
+    ⛔ STOP! 禁止继续执行测试！
+    
+    必须执行：
+    1. 输出详细的环境阻塞报告（每个 BLOCKED 类型的具体错误信息）
+    2. 列出修复环境所需的具体操作（如：安装 Node.js、启动数据库服务等）
+    3. 请求用户/运维协助修复环境
+    4. 等待环境修复后重新执行 3.0.1 环境验证
+    
+    禁止执行：
+    ❌ 跳过 BLOCKED 类型直接生成报告
+    ❌ 用估算值填充 BLOCKED 类型的测试结果
+    ❌ 将 BLOCKED 用例标记为 Pass 或 Fail
+
+ELIF 可执行率 >= 50% AND 可执行率 < 100%:
+    ⚠️ 部分环境不可用，可以继续执行可用部分
+    
+    必须执行：
+    1. 仅执行 EXECUTABLE 类型的测试用例
+    2. BLOCKED 类型的用例全部标记为 "Blocked - 环境不可用"
+    3. 报告中必须有「环境阻塞说明」章节
+    4. 通过率仅基于实际执行的用例计算
+    
+ELSE:
+    ✅ 所有环境可用，正常执行全量测试
+```
+
+#### 3.0.4 冒烟测试（⛔ 强制）
+
+> ⛔ **对每个 EXECUTABLE 的测试类型，先跑 1 个最简用例，确认框架和执行链路正常**
+
+| 测试类型 | 冒烟命令 | 预期 | 实际 | 状态 |
+|----------|---------|------|------|------|
+| 单元测试 | `pytest tests/unit/test_xxx.py::test_first -v` | 1 passed | [实际] | ✅/❌ |
+| 集成测试 | `pytest tests/integration/test_xxx.py::test_first -v` | 1 passed | [实际] | ✅/❌/BLOCKED |
+| UI 自动化 | `npx playwright test tests/e2e/xxx.spec.ts --grep "first"` | 1 passed | [实际] | ✅/❌/BLOCKED |
+
+---
+
 ### 3.1 单元测试
 
 **执行要求：**
@@ -698,6 +843,31 @@ export default defineConfig({
 });
 ```
 
+### 3.5 执行结果汇总与证据归档（⛔ 强制）
+
+> ⛔ **测试执行完毕后、进入 Phase 4 之前，必须完成以下证据归档。没有证据的结果禁止写入报告。**
+
+```markdown
+## 执行证据归档
+
+### 各类型执行证据
+| 测试类型 | 执行命令 | 框架输出的统计 | 日志文件 | 状态 |
+|----------|---------|---------------|---------|------|
+| 单元测试 | `pytest tests/unit/ -q` | [X passed, Y failed in Z.ZZs] | /tmp/unit_test_results.txt | ✅ 已归档 |
+| 集成测试 | `pytest tests/integration/ -q` | [X passed, Y failed in Z.ZZs] | /tmp/integration_test_results.txt | ✅ 已归档 / ❌ BLOCKED |
+| UI 自动化 | `npx playwright test` | [X passed, Y failed] | playwright-report/ | ✅ 已归档 / ❌ BLOCKED |
+
+### 汇总对账（⛔ 铁律 3 交叉验证）
+| 对账项 | 日志数据 | 报告数据 | 是否一致 |
+|--------|---------|---------|----------|
+| 单元测试 Pass 数 | [日志中的 passed] | [报告中的 Pass] | ✅/❌ |
+| 单元测试 Fail 数 | [日志中的 failed] | [报告中的 Fail] | ✅/❌ |
+| 集成测试执行数 | [日志中的 collected] | [报告中的总数] | ✅/❌ |
+| UI 测试执行数 | [日志中的 total] | [报告中的总数] | ✅/❌ |
+
+> ⛔ **如果任何一项不一致，必须以日志数据为准修正报告数据！**
+```
+
 ---
 
 ## Phase 4: Bug 记录与报告生成
@@ -761,7 +931,9 @@ export default defineConfig({
 
 ### 4.2 测试报告生成
 
-**测试报告结构：**
+> ⛔ **报告中的每一个数字都必须可追溯到 Phase 3 的执行证据。禁止填写没有执行证据的数据。**
+
+**测试报告结构（⛔ 必须包含「环境与执行范围」和「设计 vs 执行对账」章节）：**
 
 ```markdown
 # 测试报告: [项目名称]
@@ -772,16 +944,36 @@ export default defineConfig({
 - 测试周期：[开始日期] - [结束日期]
 - 测试负责人：测试专家
 
-## 2. 测试范围
-| 测试类型 | 用例数 | 通过 | 失败 | 阻塞 | 通过率 |
-|----------|--------|------|------|------|--------|
-| 单元测试 | [n] | [n] | [n] | [n] | [%] |
-| 集成测试 | [n] | [n] | [n] | [n] | [%] |
-| 黑盒测试 | [n] | [n] | [n] | [n] | [%] |
-| UI自动化 | [n] | [n] | [n] | [n] | [%] |
-| **总计** | [n] | [n] | [n] | [n] | [%] |
+## 2. 环境与执行范围（⛔ v2.1.0 新增必填章节）
+### 环境验证结论
+| 测试类型 | 环境状态 | 阻塞原因(如有) |
+|----------|---------|---------------|
+| 单元测试 | ✅ EXECUTABLE / ❌ BLOCKED | [原因] |
+| 集成测试 | ✅ EXECUTABLE / ❌ BLOCKED | [原因] |
+| UI 自动化 | ✅ EXECUTABLE / ❌ BLOCKED | [原因] |
 
-## 3. Bug 统计
+### 设计 vs 执行对账
+| 测试类型 | Phase 2 设计数 | 实际执行数 | 未执行数 | 执行率 | 未执行原因 |
+|----------|--------------|-----------|---------|--------|----------|
+| 单元测试 | [n] | [n] | [n] | [%] | - |
+| 集成测试 | [n] | 0 | [n] | 0% | 环境 BLOCKED |
+| 黑盒测试 | [n] | [n] | [n] | [%] | - |
+| UI 自动化 | [n] | 0 | [n] | 0% | Node.js 不可用 |
+| **总计** | [设计总数] | [执行总数] | [未执行] | [执行率] | |
+
+> ⚠️ 本次测试执行率: [执行总数]/[设计总数] = [%]
+> ⚠️ 以下通过率统计仅基于实际执行的 [执行总数] 个用例
+
+## 3. 测试结果（仅含实际执行的用例）
+| 测试类型 | 实际执行数 | 通过 | 失败 | 通过率 | 证据来源 |
+|----------|-----------|------|------|--------|----------|
+| 单元测试 | [n] | [n] | [n] | [%] | pytest 输出日志 |
+| 集成测试 | 0 | 0 | 0 | N/A | ❌ BLOCKED |
+| 黑盒测试 | [n] | [n] | [n] | [%] | 手动记录 |
+| UI自动化 | 0 | 0 | 0 | N/A | ❌ BLOCKED |
+| **总计(仅执行)** | [n] | [n] | [n] | [%] | |
+
+## 4. Bug 统计
 | 严重程度 | 数量 | 已修复 | 待修复 |
 |----------|------|--------|--------|
 | Critical | [n] | [n] | [n] |
@@ -789,27 +981,35 @@ export default defineConfig({
 | Minor | [n] | [n] | [n] |
 | Trivial | [n] | [n] | [n] |
 
-## 4. Bug 详情列表
+## 5. Bug 详情列表
 [详细 Bug 记录]
 
-## 5. 测试用例执行详情
-[测试用例表格]
+## 6. 未执行用例清单（⛔ v2.1.0 新增必填章节）
+| 测试类型 | 用例数 | 阻塞原因 | 修复建议 | 预计恢复时间 |
+|----------|--------|----------|----------|------------|
+| 集成测试 | [n] | 后端服务未启动 | 配置 uvicorn 服务 | [时间] |
+| UI 自动化 | [n] | Node.js 不可用 | 安装 Node.js 并配置 PATH | [时间] |
 
-## 6. PRD 问题与建议
+## 7. PRD 问题与建议
 [PRD 分析中发现的问题]
 
-## 7. 行业对标分析
+## 8. 行业对标分析
 [与同类产品对比分析]
 
-## 8. 测试结论
-- 测试通过率：[%]
+## 9. 测试结论
+- 设计用例总数：[设计总数]
+- 实际执行数：[执行总数]（执行率 [%]）
+- 执行通过率：[%]（仅基于实际执行的用例）
+- 未执行用例：[未执行数]（原因：环境阻塞）
 - 遗留问题：[数量]
+- ⚠️ **本次测试结论仅代表已执行部分的质量状态，不代表系统整体质量**
 - 发布建议：[建议]
 
-## 9. 附件
+## 10. 附件
 - 测试用例表格
 - Bug 截图
-- 测试日志
+- 测试日志（执行证据）
+- 环境验证记录
 ```
 
 ### 4.3 🔄 流转到测试报告跟进专家

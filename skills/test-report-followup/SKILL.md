@@ -31,6 +31,18 @@ allowed-tools: bash read_file write_file cat
 
 ---
 
+## 🛡️ 核心纲领：Anti-Fabrication & Strict Execution Rules
+
+**禁止伪造与强制证据规则 (Anti-Fabrication Policy):**
+- **严禁无证据推进:** 在所有修复及流转环节，没有确实的工程证据（Commit Hash, PR/MR链接, 设计稿更新链接等），**绝对不允许**将任务状态标记为"待验证"或"已完成"。
+- **强制阻断 (Phase Gate Check):** 每一阶段结束必须执行严格的卡点检查。任何缺失证据或状态不一致的任务必须被拦截，不允许流转至下一阶段。
+
+**人机协同与确认节点 (Human-in-the-loop Pause Points):**
+- **强制暂停点 1:** 任务分派完成（即多 Agent 调用前）必须 [PAUSE], 由人（或 tech-manager）Review 分派计划后才能开始执行。
+- **强制暂停点 2:** 完成报告生成前必经 [PAUSE], 处理未回归通过或超时升级的疑难 Issue。
+
+---
+
 ## 🚀 多 Agent 调度架构
 
 > ⚠️ **执行前必须读取 `references/multi-agent-orchestration.md` 获取完整调度指南**
@@ -525,6 +537,13 @@ PRD_001 (产品经理)
 3. 阻塞任务需要优先处理
 ```
 
+### 3.4 [PAUSE POINT 1] 任务分派评审卡点
+
+> 🛑 **MANDATORY PAUSE: 任务分派完成确认**
+> 在开始并发调度子 Agent 执行修复之前，**必须**暂停并向用户展示最终的任务分配清单及预期耗时。
+> - **等待确认:** 请用户审批或调整。
+> - **通过条件:** 用户回复 "Approve" 或 "Continue" 或同等含义的审批指令，方可进入 Phase 4 开始并发下发任务。
+
 ---
 
 ## Phase 4: 修复执行与跟踪 (Fix Execution)
@@ -582,6 +601,13 @@ PRD_001 (产品经理)
 | BUG_002 | ❌ 不通过 | 跟进专家 | [时间] | [原因] |
 ```
 
+### 4.4 阶段卡点：修复证据验证 (Phase Gate)
+
+**进入回归测试前必须通过该卡点检查：**
+1. **证据提取:** 在将任何 Issue 标记为「待测试/已部署」并准备下发给 test-expert 之前，必须提取子 Agent 提供的真实凭证（如：`Commit ID`、`URL` 或 `文件状态`）。
+2. **阻断规则:** 凡是仅仅使用自然语言宣称 "已修复" 但无硬证据的任务，一律视为**状态异常**，退回或拦截拒绝进入 Phase 5。
+3. **状态同步:** 拦截通过后必须更新 `docs/test/followup/followup-state.yml` 供程序化校验和跟踪。
+
 ---
 
 ## Phase 5: 回归测试 (Regression Testing)
@@ -603,11 +629,12 @@ PRD_001 (产品经理)
 
 1. 读取上一版本测试报告: docs/test/test-report-v[x.x.x].md
 2. 执行回归测试流程
-3. 重点验证以下已修复问题:
-   - BUG_001: [标题]
-   - BUG_002: [标题]
+3. 重点验证以下已修复问题（必须传入精准列表及修复凭证）：
+   - BUG_001: [标题] | 补丁证据: [Commit Hash]
+   - BUG_002: [标题] | 补丁证据: [URL/文件名]
    - ...
-4. 生成新版本测试报告: docs/test/test-report-v[x.x.x+1].md
+4. 指导 test-expert **仅需**针对受影响范围和以上列表执行回归测试，避免无意义盲目全量重测。
+5. 生成新版本测试报告: `docs/test/test-report-v[x.x.x+1].md`
 ```
 
 ### 5.3 回归测试范围
@@ -696,6 +723,20 @@ PRD_001 (产品经理)
 | #3 | [日期] | [日期] | 2 | 2 | 100% | ✅ 完成 |
 ```
 
+### 6.4 异常升级机制 (Issue Escalation)
+
+如遇同一问题在多轮（例如≥2轮）迭代中反复被打回，或长时间阻塞无法修复：
+- 提取并记录至 `escalated_issues` 列表。
+- 必须中止当前子 Agent 循环并在 [PAUSE POINT 2] 向 tech-manager/用户 报错求助，可能需重新评估架构修复成本或调整 PRD。
+
+### 6.5 [PAUSE POINT 2] 完成报告前评审卡点
+
+> 🛑 **MANDATORY PAUSE: 终态评审与遗留物决策**
+> 在生成最终 Completion Report 之前，若存在任何 "遗留项"、"阻塞未修复项" 或 "多次打回问题"，**必须**暂停流程：
+> - 向用户呈现这些异常项的详单及阻力影响。
+> - 询问用户：是否容忍这些缺陷直接带着遗留项发布清单结束跟进？
+> - 仅在收到用户明确的 "Proceed/Approve" 时，才能进入流转生成最终报告。
+
 ---
 
 ## 完成标准 (Completion Criteria)
@@ -771,6 +812,7 @@ PRD_001 (产品经理)
 | 跟进清单 | `docs/test/followup/followup-checklist.md` | 问题跟进清单 |
 | 任务分配 | `docs/test/followup/task-assignment.md` | 各角色任务分配 |
 | 进度跟踪 | `docs/test/followup/progress-tracking.md` | 修复进度跟踪 |
+| 状态快照 | `docs/test/followup/followup-state.yml` | **强要求环节** 生成机读YAML，强绑定 issue与真实证据 |
 | 迭代记录 | `docs/test/followup/iteration-history.md` | 迭代历史记录 |
 | 完成报告 | `docs/test/followup/completion-report.md` | 跟进完成报告 |
 
