@@ -15,17 +15,17 @@ docs/prd/
 ├── 01-project-overview.md          # 项目概述
 ├── 02-user-research.md             # 用户研究
 ├── 03-competitive-analysis.md      # 竞品分析
-├── L1-feature-architecture.yaml    # L1: 功能架构图（结构化，AI可解析）
-├── L1-feature-architecture.md      # L1: 功能架构图（Markdown可视化）
+├── L1-feature-architecture.yaml    # L1: 功能架构树（结构化，AI可解析）
+├── L1-feature-architecture.md      # L1: 树状功能架构图（Markdown可视化）
 ├── 05-role-permission.md           # 角色权限
 ├── 06-information-architecture.md  # 信息架构
 ├── 07-page-list.md                 # 页面清单
-├── L2-use-case-flows.yaml          # L2: 用例流（结构化，AI可解析）
-├── L2-use-case-flows.md            # L2: 用例流（Markdown可视化）
+├── L2-use-case-flows.yaml          # L2: 功能串联/用户路径（结构化，AI可解析）
+├── L2-use-case-flows.md            # L2: 功能串联/用户路径（Markdown可视化）
 ├── 09-interaction-spec.md          # 交互规格
 ├── 10-visual-style.md              # 视觉风格
-├── L3-user-stories.yaml            # L3: User Story+验收标准（结构化，AI可解析）
-├── L3-user-stories.md              # L3: User Story+验收标准（Markdown可视化）
+├── L3-user-stories.yaml            # L3: 基于路径的 User Story+验收标准（结构化，AI可解析）
+├── L3-user-stories.md              # L3: 基于路径的 User Story+验收标准（Markdown可视化）
 ├── 12-data-spec.md                 # 数据规格
 ├── 13-acceptance-criteria.md       # 验收标准汇总
 ├── 14-release-plan.md              # 发布计划
@@ -37,6 +37,8 @@ docs/prd/
 > - `.yaml` 文件是 AI Agent 的主要消费格式，结构化、可解析、可验证
 > - `.md` 文件是同步输出的人类可读版本
 > - L1/L2/L3 三层文件是 PRD 的核心，替代原有的 04/08/11 文件
+> - 产出顺序必须遵循：**先 L1 树状功能架构图，再 L2 功能串联/用户路径，最后 L3 User Story**
+> - **1 条用户路径 = 1 个完整 User Story**；如果路径太大，必须先回到 L2 拆成多个闭环路径
 > - 所有实体使用唯一 ID 交叉引用（详见 `references/structured-requirement-spec.md`）
 
 ---
@@ -133,9 +135,12 @@ docs/prd/
 
 | 要素 | 说明 | 必填 |
 |------|------|------|
+| 树状视图 | Markdown 先输出树状思维导图 | ✅ |
 | 能力域(Domain) | 按业务领域划分的顶层分类 | ✅ |
 | 模块(Module) | 能力域下的功能模块 | ✅ |
-| 功能(Feature) | 模块下的具体功能点，每个有唯一 ID | ✅ |
+| 子模块(Submodule) | 模块下的可选中间层 | 复杂模块必填 |
+| 功能(Feature) | 模块下的叶子功能点，每个有唯一 ID | ✅ |
+| 所属树路径 | Feature 在功能树中的完整路径 | ✅ |
 | 优先级 | P0/P1/P2 | ✅ |
 | Kano分类 | basic/performance/excitement | ✅ |
 | 所属迭代 | ITER-MVP / ITER-V1.1 等 | ✅ |
@@ -155,9 +160,12 @@ docs/prd/
 |------|------|------|
 | 角色定义 | 所有参与角色及其端点 | ✅ |
 | 用例ID | 唯一标识 UC-NNN | ✅ |
+| 路径目标 | 用户沿该路径最终完成什么 | ✅ |
 | 触发条件 | 什么触发了这个用例 | ✅ |
+| 入口 / 出口 | 路径从哪里开始，到哪里结束 | ✅ |
 | 前置条件 | 执行前必须满足的条件 | ✅ |
-| 主流程 | Happy Path，每步含 actor_action + system_response + ui_ref | ✅ |
+| 叶子功能链 | 路径经过的 Feature 顺序 | ✅ |
+| 主流程 | Happy Path，每步含 step_id + actor_action + system_response + feature_id + ui_ref | ✅ |
 | 替代流 | 分支场景，标注从主流程哪一步分叉 | ✅ |
 | 异常流 | 错误场景及恢复方式 | ✅ |
 | 后置条件 | 成功/失败后的系统状态 | ✅ |
@@ -176,6 +184,11 @@ docs/prd/
 |------|------|------|
 | 迭代定义 | 迭代目标、成功指标、功能范围 | ✅ |
 | User Story | "作为...我想要...以便..." 格式 | ✅ |
+| 主路径引用 | Story 对应哪条完整路径 | ✅ |
+| 来源路径 | Story 来自哪条用户路径 | ✅ |
+| 路径步骤引用 | Story 覆盖了路径中的哪些步骤 | ✅ |
+| 完整操作过程 | Story 对应的业务流程摘要 | ✅ |
+| 完整旅程契约 | 包含目标、入口、出口、成功/失败结果 | ✅ |
 | INVEST检查 | 6项合规性自检 | ✅ |
 | 验收标准(AC) | Given-When-Then 格式，每个Story至少3条 | ✅ |
 | AC类型标注 | happy_path/edge_case/error_case/performance/security | ✅ |
@@ -239,11 +252,12 @@ docs/prd/
 
 > **注意：** 原有的独立功能规格文档已被 L1/L2/L3 三层结构替代。
 > - 功能概述 → L1 Feature 定义
-> - 功能流程 → L2 UseCase 主流程/替代流/异常流
+> - 功能流程 / 用户路径 → L2 UseCase 主流程/替代流/异常流
 > - 界面说明 → L2 UseCase 的 ui_ref + Pencil 设计稿
 > - 业务规则 → L2 UseCase 的 business_rules
 > - 数据要求 → L2 UseCase 的 data_changes
 > - 验收标准 → L3 UserStory 的 acceptance_criteria
+> - 路径追溯 → L3 UserStory 的 source_use_cases + path_steps_ref
 
 **如需为单个复杂功能输出独立规格文档，使用以下模板：**
 
@@ -375,8 +389,12 @@ docs/prd/
 - [ ] L1 功能架构图已输出（YAML + Markdown）
 - [ ] L2 用例流已输出（YAML + Markdown）
 - [ ] L3 User Story + AC 已输出（YAML + Markdown）
-- [ ] 所有 Feature 被至少 1 个 UseCase 覆盖
-- [ ] 所有 UseCase 被至少 1 个 UserStory 覆盖
+- [ ] 复杂模块已用 `submodule` 显式建模，而不是只压进 `tree_path`
+- [ ] 所有叶子 Feature 被至少 1 个 UseCase/用户路径覆盖
+- [ ] 所有 `feature_path` 与 `ordered_unique(main_flow.feature_id)` 一致
+- [ ] 所有 UseCase 被至少 1 个完整 UserStory 覆盖
+- [ ] 所有 UserStory 都有 `primary_use_case`、`path_steps_ref`、`journey_contract`
+- [ ] 所有 UserStory 的 `path_steps_ref` 覆盖了 `primary_use_case` 的全部主流程步骤
 - [ ] 所有 UserStory 有 >= 3 条 AC（含 happy_path + edge/error）
 - [ ] 所有 AC 使用 Given-When-Then 格式
 - [ ] 所有实体 ID 交叉引用正确

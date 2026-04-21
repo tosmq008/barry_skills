@@ -290,6 +290,163 @@ def score_quality(project_dir: str) -> tuple:
     else:
         return 6, "Linter not available, default"
 
+def _parse_python_imports(text: str) -> list:
+    """Use Python ast to extract import targets from .py files."""
+    import ast as _ast
+    imports = []
+    try:
+        tree = _ast.parse(text)
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Import):
+                for alias in node.names:
+                    imports.append(alias.name)
+            elif isinstance(node, _ast.ImportFrom):
+                if node.module:
+                    imports.append(node.module)
+    except (SyntaxError, ValueError):
+        pass
+    return imports
+
+
+def _parse_python_signatures(text: str) -> tuple:
+    """Use Python ast to extract class and function signatures from .py files."""
+    import ast as _ast
+    classes = []
+    functions = []
+    try:
+        tree = _ast.parse(text)
+        for node in _ast.iter_child_nodes(tree):
+            if isinstance(node, _ast.ClassDef):
+                bases = ", ".join(
+                    getattr(b, "id", getattr(b, "attr", "?"))
+                    for b in node.bases
+                )
+                classes.append((node.name, bases))
+                # Extract methods
+                for item in _ast.iter_child_nodes(node):
+                    if isinstance(item, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                        args = ", ".join(a.arg for a in item.args.args)
+                        functions.append((f"{node.name}.{item.name}", args))
+            elif isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                args = ", ".join(a.arg for a in node.args.args)
+                functions.append((node.name, args))
+    except (SyntaxError, ValueError):
+        pass
+    return classes, functions
+
+
+def _parse_js_ts_imports(text: str) -> list:
+    """Extract import/require targets from JS/TS files using regex."""
+    import re
+    imports = []
+    # ES module: import ... from "module"
+    es_pattern = re.compile(r'''import\s+.*?\s+from\s+['"](.*?)['"]''', re.MULTILINE)
+    # CommonJS: require("module")
+    cjs_pattern = re.compile(r'''require\s*\(\s*['"](.*?)['"]\s*\)''')
+    # Dynamic import: import("module")
+    dyn_pattern = re.compile(r'''import\s*\(\s*['"](.*?)['"]\s*\)''')
+    for pat in [es_pattern, cjs_pattern, dyn_pattern]:
+        imports.extend(pat.findall(text))
+    return imports
+
+
+def _parse_js_ts_signatures(text: str) -> tuple:
+    """Extract class and function signatures from JS/TS files using regex."""
+    import re
+    classes = []
+    functions = []
+    class_pattern = re.compile(
+        r'^\s*(?:export\s+)?(?:abstract\s+)?(?:class|interface)\s+(\w+)(?:\s+extends\s+(\w+))?',
+        re.MULTILINE,
+    )
+    func_pattern = re.compile(
+        r'^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*(\([^)]*\))',
+        re.MULTILINE,
+    )
+    for m in class_pattern.finditer(text):
+        classes.append((m.group(1), m.group(2) or ""))
+    for m in func_pattern.finditer(text):
+        functions.append((m.group(1), m.group(2)))
+    return classes, functions
+
+
+def generate_repomap(project_dir: str) -> bool:
+    """Generate an AST-based structure of the project with import relationships.
+
+    Output format per file:
+        File: relative/path.py
+          class ClassName(Base1, Base2)
+            def ClassName.method(self, arg)
+          def top_level_func(arg1, arg2)
+          → imports: module1, module2
+    """
+    map_file = Path(project_dir) / ".dev-state" / "repomap.txt"
+    try:
+        if not map_file.parent.exists():
+            map_file.parent.mkdir(parents=True, exist_ok=True)
+
+        output = []
+        file_count = 0
+        for root, dirs, files in os.walk(project_dir):
+            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+            for f in sorted(files):
+                suffix = Path(f).suffix
+                if suffix not in CODE_EXTENSIONS:
+                    continue
+                try:
+                    filepath = Path(root) / f
+                    rel_path = filepath.relative_to(project_dir)
+                    text = filepath.read_text(errors="ignore")
+
+                    # Dispatch to language-specific parsers
+                    if suffix == ".py":
+                        classes, functions = _parse_python_signatures(text)
+                        imports = _parse_python_imports(text)
+                    elif suffix in {".js", ".jsx", ".ts", ".tsx"}:
+                        classes, functions = _parse_js_ts_signatures(text)
+                        imports = _parse_js_ts_imports(text)
+                    else:
+                        # Fallback minimal regex for other languages
+                        import re
+                        classes = [
+                            (m.group(2), "")
+                            for m in re.finditer(
+                                r'^\s*(class|interface|struct)\s+(\w+)',
+                                text, re.MULTILINE,
+                            )
+                        ]
+                        functions = [
+                            (m.group(2), m.group(3))
+                            for m in re.finditer(
+                                r'^\s*(def|func|fn|function)\s+(\w+)\s*(\([^)]*\))',
+                                text, re.MULTILINE,
+                            )
+                        ]
+                        imports = []
+
+                    if not (classes or functions or imports):
+                        continue
+
+                    output.append(f"File: {rel_path}")
+                    for name, bases in classes:
+                        base_str = f"({bases})" if bases else ""
+                        output.append(f"  class {name}{base_str}")
+                    for name, args in functions:
+                        arg_str = f"({args})" if not args.startswith("(") else args
+                        output.append(f"  def {name}{arg_str}")
+                    if imports:
+                        output.append(f"  → imports: {', '.join(imports)}")
+                    output.append("")
+                    file_count += 1
+                except OSError:
+                    pass
+
+        header = f"# RepoMap — {file_count} files analyzed at {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
+        map_file.write_text(header + "\n".join(output))
+        return True
+    except Exception:
+        return False
+
 
 def assess(project_dir: str) -> dict:
     """Run full health assessment."""
@@ -391,12 +548,16 @@ def main():
     parser.add_argument("--project-dir", default=os.getcwd())
     parser.add_argument("--update", action="store_true", help="Update state.json")
     parser.add_argument("--json", action="store_true", help="JSON output only")
+    parser.add_argument("--repomap", action="store_true", help="Generate RepoMap AST in .dev-state/repomap.txt")
     args = parser.parse_args()
 
     health = assess(args.project_dir)
 
     if args.update:
         update_state(args.project_dir, health)
+
+    if args.update or args.repomap:
+        generate_repomap(args.project_dir)
 
     if args.json:
         print(json.dumps(health))

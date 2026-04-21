@@ -2,346 +2,124 @@
 
 ## 概述
 
-技术经理作为协调者角色，根据 product-expert 输出的结构化 PRD（L1/L2/L3 YAML），通过平台路由决策调度客户端专家、前端专家、后端专家和测试专家四个 Agent 协同完成开发任务。
+`tech-manager` 的职责不是直接写代码，而是在 **PRD + 架构方案** 的约束下组织实施。标准链路如下：
 
----
-
-## Agent 角色详解
-
-### 1. 技术经理 (Orchestrator)
-
-**职责：**
-- 解析 product-expert 输出的 L1/L2/L3 YAML
-- 执行平台路由决策（client-expert vs frontend-expert）
-- 分解任务并分配给对应 Agent
-- 监控各 Agent 执行状态
-- 执行多端联调保障
-- 调度测试 Agent 执行验收
-- 生成开发完成报告
-
-**能力要求：**
-- 理解结构化 PRD（L1 功能架构 / L2 用例流 / L3 User Story）
-- 平台技术栈判断与路由决策
-- 任务分解和优先级排序
-- 并行调度和依赖管理
-- 多端集成验证
-
-### 2. 客户端专家 (client-expert)
-
-**职责：**
-- iOS/Android 原生开发
-- Flutter 跨平台开发
-- 微信小程序开发
-- 混合方案中的原生壳与桥接
-- 客户端架构设计与组件化
-- 客户端自测与质量保障
-
-**适用条件：**
-- PRD 中 Client 端技术栈为 iOS/Android/Flutter/小程序
-- 混合方案中的原生部分
-- 需要原生能力（相机、推送、蓝牙等）的场景
-
-**输入格式：**
-```markdown
-## 客户端 Agent 任务
-
-### 任务信息
-- 任务ID: TASK_CL_001
-- 目标平台: [iOS/Android/Flutter/小程序/混合]
-- 项目路径: /path/to/project
-- 分支: feature/xxx
-
-### 关联PRD
-- L1 功能: [F-001, F-002]
-- L2 用例: [UC-001]
-- L3 Story: [US-001]
-- UI设计稿: [.pen文件路径]
-
-### 开发内容
-| 序号 | 页面/组件 | 功能描述 | 依赖API | 来源Story |
-|------|-----------|----------|---------|-----------|
-| 1 | LoginPage | 用户登录 | POST /api/auth/login | US-002 |
-
-### 验收标准（从L3 AC提取）
-| AC-ID | Given | When | Then |
-|-------|-------|------|------|
-| AC-001 | ... | ... | ... |
-
-### 输出要求
-- 页面/组件代码
-- API 对接代码
-- 自测报告
+```text
+product-expert -> system-architect -> tech-manager -> experts -> test-expert
 ```
 
-**输出格式：**
-```json
-{
-  "task_id": "TASK_CL_001",
-  "agent_type": "client",
-  "platform": "Flutter",
-  "status": "completed",
-  "summary": { "total": 5, "completed": 5, "failed": 0 },
-  "results": [
-    {
-      "item": "LoginPage",
-      "status": "completed",
-      "files": ["lib/presentation/pages/login/login_page.dart"],
-      "ac_verified": ["AC-001", "AC-002"]
-    }
-  ]
-}
-```
+如果架构边界不清晰，`tech-manager` 必须先暂停实施并回流 `system-architect`，而不是带着不确定性硬拆任务。
 
-### 3. 前端专家 (frontend-expert)
+## 角色分工
 
-**职责：**
-- Web 前端开发（Vue/React）
-- Admin 管理后台开发
-- 运营后台开发
-- 混合方案中的 H5 页面
-- 前端测试编写
+| 角色 | 主要职责 | 输入 | 输出 |
+|------|----------|------|------|
+| `product-expert` | 输出产品需求与结构化 PRD | 业务需求 | `docs/prd/...` |
+| `system-architect` | 架构评审、架构设计、架构调整 | PRD、现有系统 | `docs/architecture/...` |
+| `tech-manager` | 实施前检查、任务拆分、调度、联调、交付 | PRD + 架构文档 | `docs/dev/...` |
+| `client-expert` | iOS、Android、Flutter、小程序、混合壳实现 | 客户端任务单 | 代码与自测结果 |
+| `frontend-expert` | Web Client、Admin、Operation、H5 实现 | 前端任务单 | 代码与自测结果 |
+| `python-expert` | API、服务、数据模型、业务逻辑实现 | 后端任务单 | 代码、测试、接口更新 |
+| `test-expert` | 功能、集成、回归与多端一致性验收 | 测试任务单 | 测试报告、Bug 列表 |
 
-**适用条件：**
-- PRD 中 Client 端技术栈为 Web（Vue/React）
-- Admin 端和 Operation 端（始终由前端专家负责）
-- 混合方案中的 WebView/H5 页面
+## 调度前硬性检查
 
-**输入格式：**
-```markdown
-## 前端 Agent 任务
+在发出任何任务单前，`tech-manager` 必须先回答以下问题：
 
-### 任务信息
-- 任务ID: TASK_FE_001
-- 项目路径: /path/to/project
-- 分支: feature/xxx
+1. 当前需求是否已经过架构关卡？
+2. API 契约是否已有唯一可信来源？
+3. 数据模型是否已经明确？
+4. 技术栈、认证、部署、数据库是否属于稳定约束？
+5. 是否存在需要先回流 `system-architect` 的结构性问题？
 
-### 关联PRD
-- L1 功能: [F-001, F-002]
-- L2 用例: [UC-001]
-- L3 Story: [US-001]
+任一问题答案不明确，都不应直接进入实现调度。
 
-### 开发内容
-| 序号 | 页面/组件 | 功能描述 | 依赖API | 来源Story |
-|------|-----------|----------|---------|-----------|
-| 1 | LoginPage | 用户登录 | POST /api/auth/login | US-002 |
+## 架构回流规则
 
-### 输出要求
-- 页面/组件代码
-- API 对接代码
-- 本地测试通过
-```
+出现以下情况时，停止专家开发并回流 `system-architect`：
 
-**输出格式：**
+- 新增或重构核心服务边界
+- 现有 API 契约无法覆盖需求
+- 数据模型、索引、关系设计明显不足
+- 认证或权限方案需要变化
+- 部署方式或基础设施假设发生变化
+- 前后端、客户端与后端对同一能力的系统边界理解不一致
+
+## 平台路由规则
+
+| 输入场景 | 调度对象 | 备注 |
+|----------|----------|------|
+| Client 端为 Web（Vue/React） | `frontend-expert` | Web Client 视为前端端 |
+| Admin / Operation | `frontend-expert` | 后台和运营端统一归前端 |
+| iOS / Android 原生 | `client-expert` | 原生端交给客户端专家 |
+| Flutter / 小程序 | `client-expert` | 跨平台和小程序交给客户端专家 |
+| 混合方案（原生壳 + WebView/H5） | `client-expert` + `frontend-expert` | 壳、桥接、H5 拆分协作 |
+| API / 数据库 / 业务逻辑 | `python-expert` | 后端统一归后端专家 |
+
+## 调度批次建议
+
+### 批次 A：可并行的无依赖任务
+
+- 静态页面与基础组件
+- 后端基础工程与数据模型骨架
+- 本地 Mock 与测试桩
+- 不依赖真实联调的页面布局与交互壳
+
+### 批次 B：受契约约束的实现任务
+
+- API 真实对接
+- 认证与权限联通
+- 数据写入与查询逻辑
+- 混合方案的 JSBridge 与容器能力
+
+### 批次 C：联调与收尾
+
+- 多端一致性校验
+- 错误处理与边界场景
+- 回归修复
+- 提交测试验收
+
+## 任务单最小字段
+
+发给任意专家的任务单，至少包含以下字段：
+
+- 任务 ID
+- 项目路径与分支
+- 来源 PRD
+- 来源架构文档
+- 当前范围与优先级
+- 不可变更架构约束
+- 功能清单 / 接口清单 / 数据模型
+- 依赖关系
+- 验收标准
+- 输出要求
+
+## 输出结果约定
+
+建议各专家回传统一结构的信息，便于 `tech-manager` 汇总：
+
 ```json
 {
   "task_id": "TASK_FE_001",
   "agent_type": "frontend",
   "status": "completed",
-  "summary": { "total": 5, "completed": 5, "failed": 0 },
-  "results": [
-    {
-      "item": "LoginPage",
-      "status": "completed",
-      "files": ["src/pages/Login.vue"],
-      "ac_verified": ["AC-001", "AC-002"]
-    }
-  ]
+  "blocked_by": [],
+  "changed_files": ["src/pages/Login.vue"],
+  "verified_items": ["AC-001", "AC-002"],
+  "open_risks": []
 }
 ```
 
-### 4. 后端专家 (python-expert)
+如果未完成，必须明确：
+- 阻塞点是什么
+- 属于实现问题还是架构问题
+- 需要谁来继续处理
 
-**职责：**
-- API 接口设计与实现
-- 数据模型设计
-- 业务逻辑处理
-- 数据库操作
-- 单元测试编写
+## 调度后的职责
 
-**输入格式：**
-```markdown
-## 后端 Agent 任务
-
-### 任务信息
-- 任务ID: TASK_BE_001
-- 项目路径: /path/to/project
-- 分支: feature/xxx
-
-### 接口清单（从L2提取）
-| 序号 | 接口路径 | 方法 | 功能描述 | 来源用例 |
-|------|----------|------|----------|----------|
-| 1 | /api/auth/login | POST | 用户登录 | UC-002 |
-
-### 数据模型（从L2 data_changes提取）
-| 模型名 | 操作 | 字段 |
-|--------|------|------|
-| User | CREATE | user_id, phone, ... |
-
-### 输出要求
-- API 接口实现
-- 数据模型定义
-- 单元测试通过
-```
-
-**输出格式：**
-```json
-{
-  "task_id": "TASK_BE_001",
-  "agent_type": "backend",
-  "status": "completed",
-  "summary": { "total": 3, "completed": 3, "failed": 0 },
-  "results": [
-    {
-      "item": "/api/auth/login",
-      "status": "completed",
-      "files": ["src/api/auth.py"],
-      "test_result": "passed"
-    }
-  ]
-}
-```
-
-### 5. 测试专家 (test-expert)
-
-**职责：**
-- 按 L3 AC 逐条验证
-- 功能测试、集成测试
-- 多端一致性测试
-- Bug 记录与测试报告
-
-**输入格式：**
-```markdown
-## 测试 Agent 任务
-
-### 任务信息
-- 任务ID: TASK_TEST_001
-- 测试环境: http://localhost:3000
-
-### 测试依据
-- PRD: docs/prd/L3-user-stories.yaml
-
-### 测试范围
-| Story ID | AC-ID | 功能点 | 测试类型 | 优先级 |
-|----------|-------|--------|----------|--------|
-| US-001 | AC-001 | 正常注册 | 功能测试 | P0 |
-
-### 输出要求
-- 按 AC-ID 逐条验证结果
-- Bug 列表
-- 测试报告
-```
-
----
-
-## 平台路由决策
-
-### 决策规则
-
-```
-规则1: Admin端 / Operation端 → 始终调度 frontend-expert
-规则2: Client端 + Web技术栈(Vue/React) → 调度 frontend-expert
-规则3: Client端 + iOS/Android原生 → 调度 client-expert
-规则4: Client端 + Flutter跨平台 → 调度 client-expert
-规则5: Client端 + 微信小程序 → 调度 client-expert
-规则6: Client端 + 混合方案 → client-expert(壳/桥接) + frontend-expert(H5)
-规则7: 后端API → 始终调度 python-expert
-```
-
-### 决策示例
-
-**示例1：纯Web全栈**
-```
-endpoints: Client(Web/Vue), Admin(Web/Vue)
-→ frontend-expert: Client端 + Admin端
-→ python-expert: 后端API
-```
-
-**示例2：Flutter + Web Admin**
-```
-endpoints: Client(Flutter), Admin(Web/React)
-→ client-expert: Client端(Flutter)
-→ frontend-expert: Admin端(React)
-→ python-expert: 后端API
-```
-
-**示例3：多端覆盖**
-```
-endpoints: Client(iOS+Android+小程序), Admin(Web/Vue)
-→ client-expert: Client端(iOS/Android/小程序)
-→ frontend-expert: Admin端(Vue)
-→ python-expert: 后端API
-```
-
-**示例4：混合方案**
-```
-endpoints: Client(原生壳+H5), Admin(Web/Vue)
-→ client-expert: 原生壳、JSBridge、原生页面
-→ frontend-expert: H5页面 + Admin端
-→ python-expert: 后端API
-```
-
----
-
-## 调度策略
-
-### 任务分解原则
-
-1. **按平台路由分组**
-   - 原生/跨平台客户端 → 客户端专家
-   - Web前端/Admin/运营 → 前端专家
-   - API/数据/业务逻辑 → 后端专家
-   - 测试/验证 → 测试专家
-
-2. **按优先级排序** — P0 先行，按 L3 迭代范围确定边界
-
-3. **按依赖关系排序** — 无依赖并行，有依赖串行
-
-### 并行执行策略
-
-**策略A：Web全栈（2 Agent）**
-```
-后端   ████████████████████████
-前端   ████████░░░░████████████
-联调                    ████████
-测试                            ████████
-```
-
-**策略B：原生App全栈（2 Agent）**
-```
-后端     ████████████████████████
-客户端   ████████░░░░████████████
-联调                      ████████
-测试                              ████████
-```
-
-**策略C：多端项目（3 Agent）**
-```
-后端     ████████████████████████
-客户端   ████████░░░░████████████
-前端     ████████░░░░████████████
-联调                      ████████████
-测试                                    ████████
-```
-
----
-
-## 错误处理
-
-| 失败类型 | 处理方式 |
-|----------|----------|
-| 超时 | 标记未完成，记录已完成部分 |
-| 依赖阻塞 | 等待上游完成或标记阻塞 |
-| 任务失败 | 记录失败原因，继续其他任务 |
-| 平台路由错误 | 重新评估技术栈，调整Agent分配 |
-
-重试机制：最大2次，间隔60秒。
-
----
-
-## 最佳实践
-
-1. **先解析PRD再分配** - 充分理解L1/L2/L3后再做平台路由决策
-2. **合理判断技术栈** - 不确定时询问用户确认Client端技术栈
-3. **混合方案注意协作** - client-expert 和 frontend-expert 需明确JSBridge协议
-4. **结果对照AC** - 用L3 AC作为验收标准
-5. **迭代优化** - 分析效率，改进调度
+`tech-manager` 在调度后继续负责：
+- 维护任务依赖顺序
+- 识别阻塞属于实现还是架构
+- 推动接口、数据、认证等跨角色对齐
+- 组织联调和测试
+- 汇总完成报告

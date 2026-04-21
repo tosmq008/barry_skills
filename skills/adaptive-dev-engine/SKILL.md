@@ -1,12 +1,12 @@
 ---
 name: adaptive-dev-engine
-description: "自适应持续开发引擎。双模式支持：CLI外置守护进程，亦或IDE内原生无间断死循环执行。根据健康度评分，自适应调度不同维度专家完成开发任务直到达标。"
+description: "自适应持续开发引擎 V3。AST+Import RepoMap 雷达、守护进程级三击熔断回滚、结构化角色/Blocker 追踪。双模式支持：CLI外置守护进程，亦或IDE内原生无间断死循环执行。"
 license: MIT
 compatibility: "Works as CLI daemon or natively inside IDE via continuous autoloop."
 metadata:
   category: automation
   phase: orchestration
-  version: "2.1.0"
+  version: "3.0.0"
 ---
 
 # Adaptive Dev Engine
@@ -71,13 +71,49 @@ metadata:
   - `code` 业务缺陷 → 读 `python-expert` 和/或 `frontend-expert`
   - `tests` 缺陷 → 读 `test-expert`
 - 消化它们的纪律或 checklist。
+- **角色写入协议（必须执行）**：切换角色后，立刻使用 `run_command` 更新 state.json：
+  ```bash
+  python3 -c "
+  import json, fcntl
+  from datetime import datetime, timezone
+  with open('.dev-state/state.json', 'r+') as f:
+      fcntl.flock(f, fcntl.LOCK_EX)
+      d = json.load(f)
+      d.setdefault('engine', {})['current_expert'] = 'EXPERT_NAME_HERE'
+      d['engine']['expert_started_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+      d['engine'].setdefault('session_role_history', []).append({'role': 'EXPERT_NAME_HERE', 'at': d['engine']['expert_started_at']})
+      f.seek(0); f.truncate(); json.dump(d, f, indent=2, ensure_ascii=False)
+      fcntl.flock(f, fcntl.LOCK_UN)
+  "
+  ```
 
-**Step 4: 动手执行 (Execute)**
-- 扮演上述角色，使用文件编辑或 shell 命令在工作区实施修复方案。
-- 每完成一个维度的实质性推进，在 `.dev-state/state.json` 追加 `action_history` 并更新 `checkpoint`。
+**Step 4: Micro-Git Sandbox 与执行 (Execute)**
+- **沙盒上膛**：在对任何代码行进组装修改或 Bug 修复前，强制使用 `run_command` 执行 `git add . && git commit -m "Auto WIP"` 进行乐观锁备份。如果目录没有 git，先 `git init`。
+- **狙击手修改协议**：扮演上述角色，严格限制大面积文件重写。强制使用工具对特征块局部替换，将修改规模控制在 AST Token 级。
+- 每完成维度的修改且 Linter/Tests **绿色**通过后，在 `.dev-state/state.json` 追加 `action_history`。
 
-**Step 5: 无休止继续 (Loop)**
-- 执行完毕一个补丁 / 任务后，直接开始另一个 Tool Call 触发 Step 1。绝不停止。
+**Step 5: 隔离熔断与无休止继续 (Harness Rollback & Loop)**
+- **守护进程级熔断（硬性执行）**：你不需要自己计数失败次数了！守护脚本 `adaptive-dev` 会在每次会话后自动比较健康分变化。如果连续 3 个会话健康分下降，守护脚本会 **自动执行 `git reset --hard`** 回滚到会话开始前的 WIP 快照。这是硬性的，你无法阻止。
+- **你需要做的**：如果你在本轮修 Bug 时连续 3 次 Linter/Tests 报错且无好转趋势，**主动放弃并记录 blocker**（而不是继续死磕直到守护脚本来回滚你）。使用结构化格式写入 blocker：
+  ```bash
+  python3 -c "
+  import json, fcntl
+  from datetime import datetime, timezone
+  with open('.dev-state/state.json', 'r+') as f:
+      fcntl.flock(f, fcntl.LOCK_EX)
+      d = json.load(f)
+      d.setdefault('blockers', []).append({
+          'type': 'code_stuck',
+          'message': '描述问题和你尝试过的方法',
+          'file': '相关文件路径',
+          'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+      })
+      d['blockers'] = d['blockers'][-20:]
+      f.seek(0); f.truncate(); json.dump(d, f, indent=2, ensure_ascii=False)
+      fcntl.flock(f, fcntl.LOCK_UN)
+  "
+  ```
+- **继续 Loop**：一旦 blocker 写入完成，立即跳转到 Step 1 重新评估健康度。绝不停止。
 
 ### 系统耗尽（强制断点）
 由于底层有最大工具调用次数（例如几十步）的硬性限制，你的工具调用链最终肯定会被系统强行打断，进入“必须回话”状态。

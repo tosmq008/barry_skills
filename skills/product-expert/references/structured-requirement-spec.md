@@ -9,11 +9,11 @@
 ## 总览：三层需求模型
 
 ```
-L1 功能架构图（按能力域/模块）     → 回答"系统有什么"
-    ↓ 每个 Feature 至少被 1 个 Use Case 覆盖
-L2 核心用户场景/用例流（按角色与流程） → 回答"怎么用"
-    ↓ 每个 Use Case 至少拆解为 1 个 User Story
-L3 User Story + 验收标准（按迭代）   → 回答"怎么做、做到什么程度"
+L1 功能架构树（按能力域/模块/功能叶子） → 回答"系统有什么"
+    ↓ 每个叶子 Feature 至少被 1 条用户路径覆盖
+L2 核心用户场景 / 功能串联路径          → 回答"用户如何完成目标"
+    ↓ 每条路径必须沉淀为 1 个完整 User Story
+L3 User Story + 验收标准                → 回答"按完整路径把功能做出来"
 ```
 
 ### 三层交叉引用关系
@@ -30,6 +30,7 @@ Feature(F-xxx) ←→ UseCase(UC-xxx) ←→ UserStory(US-xxx) ←→ Acceptance
 |------|------|------|------|
 | 能力域 | D- | D-NNN | D-001 |
 | 模块 | M- | M-NNN | M-001 |
+| 子模块 | SM- | SM-NNN | SM-001 |
 | 功能 | F- | F-NNN | F-001 |
 | 用例 | UC- | UC-NNN | UC-001 |
 | 用例替代流 | UC-NNN-A | UC-NNN-AN | UC-001-A1 |
@@ -41,9 +42,9 @@ Feature(F-xxx) ←→ UseCase(UC-xxx) ←→ UserStory(US-xxx) ←→ Acceptance
 
 ---
 
-## L1：功能架构图（Functional Architecture Map）
+## L1：功能架构图（Functional Architecture Tree）
 
-> 目标：让 AI Agent 一次性识别产品的全部功能边界、模块划分、优先级分布。
+> 目标：让 AI Agent 一次性识别产品的全部功能边界、树状层级、叶子功能点与优先级分布。
 
 ### L1 输出格式
 
@@ -63,43 +64,50 @@ domains:
         module_name: "认证模块"
         description: "注册、登录、身份验证"
         endpoints: ["Client", "Admin"]  # 涉及哪些端
-        features:
-          - feature_id: "F-001"
-            feature_name: "手机号注册"
-            description: "用户通过手机号+验证码完成注册"
-            priority: "P0"           # P0/P1/P2
-            kano_type: "basic"       # basic/performance/excitement
-            iteration: "ITER-MVP"    # 所属迭代
-            endpoints: ["Client"]    # 功能出现在哪些端
-            depends_on: []           # 依赖的其他 feature_id
-            pages: ["P-C-002"]       # 关联页面 ID
-            status: "planned"        # planned/in-dev/done/deprecated
+        submodules:
+          - submodule_id: "SM-001"
+            submodule_name: "注册子模块"
+            description: "围绕新用户注册形成的完整认证能力"
+            features:
+              - feature_id: "F-001"
+                feature_name: "手机号注册"
+                description: "用户通过手机号发起注册"
+                tree_path: ["产品", "用户域", "认证模块", "注册子模块", "手机号注册"]
+                priority: "P0"           # P0/P1/P2
+                kano_type: "basic"       # basic/performance/excitement
+                iteration: "ITER-MVP"    # 所属迭代
+                endpoints: ["Client"]    # 功能出现在哪些端
+                depends_on: []           # 依赖的其他 feature_id
+                pages: ["P-C-003"]       # 关联页面 ID
+                status: "planned"        # planned/in-dev/done/deprecated
 
-          - feature_id: "F-002"
-            feature_name: "验证码登录"
-            description: "用户通过手机号+验证码快速登录"
-            priority: "P0"
-            kano_type: "basic"
-            iteration: "ITER-MVP"
-            endpoints: ["Client"]
-            depends_on: ["F-001"]
-            pages: ["P-C-001"]
-            status: "planned"
+              - feature_id: "F-002"
+                feature_name: "验证码校验"
+                description: "用户输入验证码后系统完成注册校验"
+                tree_path: ["产品", "用户域", "认证模块", "注册子模块", "验证码校验"]
+                priority: "P0"
+                kano_type: "basic"
+                iteration: "ITER-MVP"
+                endpoints: ["Client"]
+                depends_on: ["F-001"]
+                pages: ["P-C-003"]
+                status: "planned"
 
       - module_id: "M-002"
-        module_name: "个人中心模块"
-        description: "个人信息管理、头像、昵称"
+        module_name: "新手引导模块"
+        description: "注册完成后的首次初始化与进入首页"
         endpoints: ["Client"]
         features:
-          - feature_id: "F-010"
-            feature_name: "个人信息编辑"
-            description: "用户修改头像、昵称、个人简介"
+          - feature_id: "F-003"
+            feature_name: "首次登录初始化"
+            description: "系统完成首次登录初始化并引导用户进入首页"
+            tree_path: ["产品", "用户域", "新手引导模块", "首次登录初始化"]
             priority: "P0"
             kano_type: "basic"
             iteration: "ITER-MVP"
             endpoints: ["Client"]
-            depends_on: ["F-001"]
-            pages: ["P-C-007"]
+            depends_on: ["F-002"]
+            pages: ["P-C-004"]
             status: "planned"
 
   - domain_id: "D-002"
@@ -111,16 +119,13 @@ domains:
         # ... 同上结构
 
 # ── 跨域依赖关系 ──
-cross_domain_dependencies:
-  - from: "F-010"
-    to: "F-001"
-    type: "requires"        # requires/enhances/conflicts
-    description: "编辑个人信息需要先完成注册"
+cross_domain_dependencies: []
 
 # ── 统计摘要（AI 自动生成） ──
 summary:
   total_domains: 0
   total_modules: 0
+  total_submodules: 0
   total_features: 0
   by_priority:
     P0: 0
@@ -133,36 +138,50 @@ summary:
     Admin: 0
     Operation: 0
   coverage_check:
-    features_without_use_case: []   # 应为空
-    features_without_page: []       # 应为空
+    leaf_features_without_use_case: []   # 应为空
+    features_without_page: []            # 应为空
+    non_leaf_feature_refs: []            # 应为空
 ```
 
 ### L1 Markdown 可视化（同步输出）
 
-除 YAML 外，同步输出 Markdown 版本供人类快速浏览：
+除 YAML 外，同步输出 Markdown 版本供人类快速浏览。**Markdown 必须先给出树状思维导图，再给出叶子功能点明细表。**
 
 ```markdown
 # 功能架构图
 
+## 树状视图
+- 产品名称
+  - D-001 用户域
+    - M-001 认证模块
+      - SM-001 注册子模块
+        - F-001 手机号注册
+        - F-002 验证码校验
+    - M-002 新手引导模块
+      - F-003 首次登录初始化
+
+## 叶子功能点明细
+
 ## D-001 用户域
 
 ### M-001 认证模块 [Client, Admin]
-| ID | 功能 | 优先级 | Kano | 迭代 | 端 | 依赖 | 状态 |
-|----|------|--------|------|------|----|------|------|
-| F-001 | 手机号注册 | P0 | 基础 | MVP | Client | - | planned |
-| F-002 | 验证码登录 | P0 | 基础 | MVP | Client | F-001 | planned |
+#### SM-001 注册子模块
+| ID | 功能 | 树路径 | 优先级 | Kano | 迭代 | 端 | 依赖 | 状态 |
+|----|------|--------|--------|------|------|----|------|------|
+| F-001 | 手机号注册 | 产品/用户域/认证模块/注册子模块/手机号注册 | P0 | 基础 | MVP | Client | - | planned |
+| F-002 | 验证码校验 | 产品/用户域/认证模块/注册子模块/验证码校验 | P0 | 基础 | MVP | Client | F-001 | planned |
 
-### M-002 个人中心模块 [Client]
-| ID | 功能 | 优先级 | Kano | 迭代 | 端 | 依赖 | 状态 |
-|----|------|--------|------|------|----|------|------|
-| F-010 | 个人信息编辑 | P0 | 基础 | MVP | Client | F-001 | planned |
+### M-002 新手引导模块 [Client]
+| ID | 功能 | 树路径 | 优先级 | Kano | 迭代 | 端 | 依赖 | 状态 |
+|----|------|--------|--------|------|------|----|------|------|
+| F-003 | 首次登录初始化 | 产品/用户域/新手引导模块/首次登录初始化 | P0 | 基础 | MVP | Client | F-002 | planned |
 ```
 
 ---
 
 ## L2：核心用户场景 / 用例流（Use Case Flows）
 
-> 目标：让 AI Agent 理解每个功能"怎么被使用"，包括正常流、替代流、异常流。
+> 目标：让 AI Agent 理解叶子功能点如何被串成完整用户路径，包括正常流、替代流、异常流。
 
 ### L2 输出格式
 
@@ -195,12 +214,16 @@ use_cases:
   - uc_id: "UC-001"
     uc_name: "新用户注册"
     description: "用户首次使用产品，通过手机号完成注册"
+    journey_goal: "让新用户完成注册并进入首页开始使用"
     actor: "ACT-001"
     trigger: "用户点击注册按钮"
+    entry_point: "P-C-001"
+    exit_point: "P-C-004"
     priority: "P0"
     iteration: "ITER-MVP"
-    related_features: ["F-001"]
-    related_pages: ["P-C-002", "P-C-003"]
+    related_features: ["F-001", "F-002", "F-003"]
+    related_pages: ["P-C-001", "P-C-003", "P-C-004"]
+    feature_path: ["F-001", "F-002", "F-003"]
 
     # 前置条件
     preconditions:
@@ -211,25 +234,39 @@ use_cases:
     # 主流程（Happy Path）
     main_flow:
       - step: 1
+        step_id: "UC-001.step1"
         actor_action: "用户打开App，点击'注册'按钮"
         system_response: "显示注册页面，包含手机号输入框"
+        feature_id: "F-001"
         ui_ref: "P-C-003"
         data_in: null
         data_out: null
       - step: 2
+        step_id: "UC-001.step2"
         actor_action: "用户输入手机号，点击'获取验证码'"
         system_response: "校验手机号格式，发送短信验证码，启动60秒倒计时"
+        feature_id: "F-001"
         ui_ref: "P-C-003"
         data_in: { "phone": "string, 11位手机号" }
         data_out: { "sms_code": "string, 6位数字" }
         business_rules: ["BR-001", "BR-002"]
       - step: 3
+        step_id: "UC-001.step3"
         actor_action: "用户输入验证码，点击'注册'"
-        system_response: "验证码校验通过，创建用户账号，自动登录，跳转首页"
-        ui_ref: "P-C-004"
+        system_response: "验证码校验通过，创建用户账号并建立登录态"
+        feature_id: "F-002"
+        ui_ref: "P-C-003"
         data_in: { "phone": "string", "code": "string" }
         data_out: { "user_id": "string", "token": "string" }
         business_rules: ["BR-003"]
+      - step: 4
+        step_id: "UC-001.step4"
+        actor_action: "用户等待初始化完成"
+        system_response: "系统完成首次登录初始化，跳转首页"
+        feature_id: "F-003"
+        ui_ref: "P-C-004"
+        data_in: null
+        data_out: null
 
     # 替代流
     alternative_flows:
@@ -325,7 +362,7 @@ summary:
     P0: 0
     P1: 0
   coverage_check:
-    features_without_use_case: []   # 应为空
+    leaf_features_without_use_case: []   # 应为空
 ```
 
 ### L2 Markdown 可视化（同步输出）
@@ -334,7 +371,10 @@ summary:
 # 用例流：UC-001 新用户注册
 
 **角色:** 普通用户 | **优先级:** P0 | **迭代:** MVP
-**关联功能:** F-001 | **关联页面:** P-C-002, P-C-003
+**路径目标:** 完成注册并进入首页
+**入口 / 出口:** P-C-001 → P-C-004
+**功能链:** F-001 → F-002 → F-003
+**关联页面:** P-C-001, P-C-003, P-C-004
 
 ## 前置条件
 - 用户未登录
@@ -344,18 +384,22 @@ summary:
 ```
 用户                          系统
  │                             │
- │──── 1. 点击注册 ──────────▶│
+ │──── 1. 点击注册(F-001) ───▶│
  │                             │──── 显示注册页面
  │◀────────────────────────────│
  │                             │
- │──── 2. 输入手机号 ─────────▶│
+ │──── 2. 输入手机号(F-001) ─▶│
  │     点击获取验证码           │──── 校验格式
  │                             │──── 发送短信
  │◀──── 显示60秒倒计时 ────────│
  │                             │
- │──── 3. 输入验证码 ─────────▶│
+ │──── 3. 输入验证码(F-002) ─▶│
  │     点击注册                 │──── 校验验证码
  │                             │──── 创建账号
+ │◀──── 进入初始化中态 ────────│
+ │                             │
+ │──── 4. 等待初始化(F-003) ─▶│
+ │                             │──── 初始化完成
  │◀──── 跳转首页 ──────────────│
 ```
 
@@ -373,7 +417,7 @@ summary:
 
 ## L3：User Story + 验收标准（按迭代）
 
-> 目标：让 AI Agent 精确知道"做什么、做到什么程度"，每条验收标准可自动化测试。
+> 目标：让 AI Agent 精确知道"沿着哪条完整用户路径做什么、做到什么程度"，每条验收标准可自动化测试。
 
 ### L3 输出格式
 
@@ -392,18 +436,29 @@ iterations:
         target: ">= 30%"
       - metric: "次日留存率"
         target: ">= 40%"
-    scope_features: ["F-001", "F-002", "F-010"]  # 本迭代包含的功能
+    scope_features: ["F-001", "F-002", "F-003"]  # 本迭代包含的功能
 
     stories:
       - story_id: "US-001"
-        title: "手机号注册"
-        story: "作为 [普通用户]，我想要 [通过手机号快速注册]，以便 [开始使用产品核心功能]"
+        title: "完成手机号注册并进入首页"
+        story: "作为 [普通用户]，我想要 [通过手机号快速注册并进入首页]，以便 [立刻开始使用产品核心功能]"
         actor: "ACT-001"
         priority: "P0"
         story_points: 5
-        related_features: ["F-001"]
+        related_features: ["F-001", "F-002", "F-003"]
         related_use_cases: ["UC-001"]
-        related_pages: ["P-C-003"]
+        related_pages: ["P-C-001", "P-C-003", "P-C-004"]
+        primary_use_case: "UC-001"
+        source_use_cases: ["UC-001"]
+        path_steps_ref: ["UC-001.step1", "UC-001.step2", "UC-001.step3", "UC-001.step4"]
+        journey_summary: "用户从登录页进入注册页，完成手机号注册并跳转首页"
+        journey_contract:
+          journey_goal: "让新用户完成注册并进入首页开始使用"
+          journey_entry: "P-C-001"
+          journey_exit: "P-C-004"
+          success_outcome: "用户账号已创建，建立登录态并进入首页"
+          failure_outcome: "用户停留在注册页，账号未创建"
+          covers_full_journey: true
         depends_on: []                # 依赖的其他 story_id
 
         # INVEST 检查（AI 自动验证）
@@ -511,15 +566,19 @@ iterations:
 
 **目标:** 验证核心价值假设
 **成功指标:** 注册转化率 >= 30% | 次日留存 >= 40%
-**功能范围:** F-001, F-002, F-010
+**功能范围:** F-001, F-002, F-003
 
 ---
 
-## US-001 手机号注册 [P0, 5SP]
+## US-001 完成手机号注册并进入首页 [P0, 5SP]
 
-> 作为 **普通用户**，我想要 **通过手机号快速注册**，以便 **开始使用产品核心功能**
+> 作为 **普通用户**，我想要 **通过手机号快速注册并进入首页**，以便 **立刻开始使用产品核心功能**
 
-**关联:** F-001 → UC-001 → P-C-003
+**来源路径:** UC-001
+**路径步骤:** UC-001.step1 → step2 → step3 → step4
+**关联:** F-001 → F-002 → F-003 → UC-001 → P-C-003 / P-C-004
+**完整路径约束:** covers_full_journey = true
+**完整操作过程:** 从登录页进入注册页，完成手机号与验证码校验后跳转首页
 
 | AC-ID | 类型 | Given | When | Then | 测试类型 |
 |-------|------|-------|------|------|----------|
@@ -539,27 +598,45 @@ iterations:
 
 > 以下规则供 AI Agent 在 PRD 输出后自动执行完整性校验。
 
-### 规则 1：功能全覆盖检查
+### 规则 1：功能树完整性检查
+
+```
+RULE: feature_tree_integrity
+FOR EACH domain D in L1:
+  ASSERT D.modules IS NOT EMPTY
+FOR EACH module M in all domains:
+  ASSERT (M.features IS NOT EMPTY) OR (M.submodules IS NOT EMPTY)
+  ASSERT NOT (M.features IS NOT EMPTY AND M.submodules IS NOT EMPTY)
+  FOR EACH submodule SM in M.submodules:
+    ASSERT SM.features IS NOT EMPTY
+FOR EACH feature F in L1:
+  ASSERT F.tree_path IS NOT EMPTY
+  ASSERT F is leaf node
+ERROR: "L1 功能树不完整：模块未正确使用 features/submodules、缺失 tree_path 或非叶子 Feature 引用"
+```
+
+### 规则 2：功能全覆盖检查
 
 ```
 RULE: feature_coverage
 FOR EACH feature F in L1:
   ASSERT EXISTS at least 1 use_case UC in L2
-    WHERE F.feature_id IN UC.related_features
-  ERROR: "功能 {F.feature_id} {F.feature_name} 未被任何用例覆盖"
+    WHERE F.feature_id IN UC.feature_path
+  ERROR: "叶子功能 {F.feature_id} {F.feature_name} 未被任何用例/路径覆盖"
 ```
 
-### 规则 2：用例全覆盖检查
+### 规则 3：用例全覆盖检查
 
 ```
 RULE: use_case_coverage
 FOR EACH use_case UC in L2:
   ASSERT EXISTS at least 1 user_story US in L3
-    WHERE UC.uc_id IN US.related_use_cases
-  ERROR: "用例 {UC.uc_id} {UC.uc_name} 未被任何 User Story 覆盖"
+    WHERE US.primary_use_case == UC.uc_id
+      AND US.journey_contract.covers_full_journey == true
+  ERROR: "用例 {UC.uc_id} {UC.uc_name} 未被任何完整 User Story 覆盖"
 ```
 
-### 规则 3：验收标准完整性检查
+### 规则 4：验收标准完整性检查
 
 ```
 RULE: acceptance_criteria_completeness
@@ -570,18 +647,23 @@ FOR EACH user_story US in L3:
   ERROR: "User Story {US.story_id} 验收标准不完整：至少需要1个正常流+1个异常/边界"
 ```
 
-### 规则 4：页面关联检查
+### 规则 5：路径绑定检查
 
 ```
-RULE: page_coverage
-FOR EACH feature F in L1:
-  ASSERT F.pages IS NOT EMPTY
-  FOR EACH page_id IN F.pages:
-    ASSERT EXISTS page P in page_list WHERE P.page_id == page_id
-  ERROR: "功能 {F.feature_id} 缺少页面关联或关联了不存在的页面"
+RULE: path_binding
+FOR EACH use_case UC in L2:
+  ASSERT UC.feature_path IS NOT EMPTY
+  LET normalized_flow_feature_path = ordered_unique(UC.main_flow[].feature_id)
+  ASSERT normalized_flow_feature_path == UC.feature_path
+  FOR EACH step S in UC.main_flow:
+    ASSERT S.step_id IS NOT EMPTY
+    ASSERT S.feature_id IS NOT EMPTY
+    ASSERT EXISTS feature F in L1 WHERE F.feature_id == S.feature_id
+    ASSERT EXISTS page P in page_list WHERE P.page_id == S.ui_ref
+  ERROR: "用例 {UC.uc_id} 的 feature_path 与 main_flow 未形成一致的串联路径，或步骤引用了不存在的叶子功能/页面"
 ```
 
-### 规则 5：迭代范围一致性检查
+### 规则 6：迭代范围一致性检查
 
 ```
 RULE: iteration_consistency
@@ -592,7 +674,7 @@ FOR EACH iteration ITER in L3:
   ERROR: "User Story {US.story_id} 关联的功能 {feature_id} 不属于当前迭代"
 ```
 
-### 规则 6：依赖完整性检查
+### 规则 7：依赖完整性检查
 
 ```
 RULE: dependency_integrity
@@ -603,19 +685,32 @@ FOR EACH feature F in L1 WHERE F.depends_on IS NOT EMPTY:
   ERROR: "功能 {F.feature_id} 依赖的 {dep_id} 不存在或迭代顺序错误"
 ```
 
-### 规则 7：INVEST 合规检查
+### 规则 8：完整路径 Story 检查
 
 ```
-RULE: invest_compliance
+RULE: story_path_traceability
 FOR EACH user_story US in L3:
+  ASSERT US.primary_use_case IS NOT EMPTY
+  ASSERT US.source_use_cases IS NOT EMPTY
+  ASSERT US.primary_use_case IN US.source_use_cases
+  ASSERT US.path_steps_ref IS NOT EMPTY
+  ASSERT US.journey_contract.covers_full_journey == true
+  ASSERT US.journey_contract.journey_goal IS NOT EMPTY
+  ASSERT US.journey_contract.journey_entry IS NOT EMPTY
+  ASSERT US.journey_contract.journey_exit IS NOT EMPTY
+  ASSERT US.journey_contract.success_outcome IS NOT EMPTY
+  ASSERT US.journey_contract.failure_outcome IS NOT EMPTY
+  ASSERT US.path_steps_ref == all main_flow.step_id of US.primary_use_case
   ASSERT US.invest_check.independent == true
   ASSERT US.invest_check.valuable == true
   ASSERT US.invest_check.testable == true
+  ERROR IF any assertion above fails:
+    "User Story {US.story_id} 不是一条完整用户路径：缺少主路径引用、完整旅程契约，或未覆盖 primary_use_case 的全部步骤"
   WARNING IF US.invest_check.small == false:
-    "User Story {US.story_id} 可能过大，建议拆分"
+    "User Story {US.story_id} 可能过大，建议先回到 L2 拆分 UseCase，而不是在 L3 拆碎 Story"
 ```
 
-### 规则 8：AC 可测试性检查
+### 规则 9：AC 可测试性检查
 
 ```
 RULE: ac_testability
@@ -629,27 +724,19 @@ FOR EACH ac IN all acceptance_criteria:
     "AC {ac.ac_id} 无法自动化测试，需人工验证"
 ```
 
-### 规则 9：UI 设计稿关联检查
-
-```
-RULE: ui_design_coverage
-FOR EACH page P referenced in L1 or L2:
-  ASSERT EXISTS design_file for P
-    WHERE design_file is .pen file with matching page
-  ERROR: "页面 {P.page_id} 缺少 UI 设计稿"
-```
-
 ### 规则 10：端到端流程完整性
 
 ```
 RULE: e2e_flow_completeness
 FOR EACH use_case UC in L2:
+  ASSERT UC.entry_point IS NOT EMPTY
+  ASSERT UC.exit_point IS NOT EMPTY
   ASSERT UC.preconditions IS NOT EMPTY
   ASSERT UC.main_flow.length >= 2
   ASSERT UC.postconditions.success IS NOT EMPTY
   ASSERT UC.postconditions.failure IS NOT EMPTY
   ASSERT UC.exception_flows.length >= 1
-  ERROR: "用例 {UC.uc_id} 流程不完整：缺少前置/后置条件或异常流"
+  ERROR: "用例 {UC.uc_id} 流程不完整：缺少入口/出口、前置/后置条件或异常流"
 ```
 
 ---
@@ -661,23 +748,23 @@ FOR EACH use_case UC in L2:
 │                    PRD 完整性验证流程                              │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  Step 1: 解析 L1 YAML → 提取所有 Feature ID                    │
+│  Step 1: 解析 L1 YAML → 校验树结构并提取所有叶子 Feature ID     │
 │     │                                                           │
 │     ▼                                                           │
 │  Step 2: 解析 L2 YAML → 提取所有 UseCase ID                    │
-│     │    检查 Rule 1: 每个 Feature 被 UseCase 覆盖             │
+│     │    检查 Rule 2: 每个叶子 Feature 被 UseCase 覆盖         │
+│     │    检查 Rule 5: feature_path 与 main_flow 串联一致        │
 │     ▼                                                           │
 │  Step 3: 解析 L3 YAML → 提取所有 UserStory ID                  │
-│     │    检查 Rule 2: 每个 UseCase 被 UserStory 覆盖           │
-│     │    检查 Rule 3: 每个 UserStory 有完整 AC                  │
+│     │    检查 Rule 3: 每个 UseCase 被完整 UserStory 覆盖       │
+│     │    检查 Rule 4: 每个 UserStory 有完整 AC                  │
 │     ▼                                                           │
 │  Step 4: 交叉验证                                               │
-│     │    检查 Rule 4: 页面关联                                  │
-│     │    检查 Rule 5: 迭代一致性                                │
-│     │    检查 Rule 6: 依赖完整性                                │
-│     │    检查 Rule 7: INVEST 合规                               │
-│     │    检查 Rule 8: AC 可测试性                               │
-│     │    检查 Rule 9: UI 设计稿关联                             │
+│     │    检查 Rule 1: 树结构完整性                              │
+│     │    检查 Rule 6: 迭代一致性                                │
+│     │    检查 Rule 7: 依赖完整性                                │
+│     │    检查 Rule 8: 完整路径 Story 约束                       │
+│     │    检查 Rule 9: AC 可测试性                               │
 │     │    检查 Rule 10: 端到端完整性                              │
 │     ▼                                                           │
 │  Step 5: 输出验证报告                                           │
@@ -702,6 +789,7 @@ FOR EACH use_case UC in L2:
 |------|------|
 | 能力域 | X |
 | 模块 | X |
+| 子模块 | X |
 | 功能 | X |
 | 用例 | X |
 | User Story | X |
@@ -710,10 +798,10 @@ FOR EACH use_case UC in L2:
 ## 覆盖率
 | 检查项 | 结果 | 详情 |
 |--------|------|------|
-| 功能→用例覆盖率 | X/Y (Z%) | [未覆盖列表] |
-| 用例→故事覆盖率 | X/Y (Z%) | [未覆盖列表] |
+| 叶子功能→用例覆盖率 | X/Y (Z%) | [未覆盖列表] |
+| 用例→完整故事覆盖率 | X/Y (Z%) | [未覆盖列表] |
+| feature_path→main_flow 串联一致率 | X/Y (Z%) | [缺失列表] |
 | 故事→AC覆盖率 | X/Y (Z%) | [不完整列表] |
-| 页面→设计稿覆盖率 | X/Y (Z%) | [缺失列表] |
 
 ## 验证结果
 | 规则 | 状态 | 问题数 | 详情 |
@@ -733,25 +821,31 @@ FOR EACH use_case UC in L2:
 
 ### 编写 L1 的最佳实践
 
-1. **先画能力域边界** — 按业务领域而非技术模块划分
-2. **每个功能必须有唯一 ID** — 后续所有引用都基于此 ID
-3. **优先级必须明确** — P0 是 MVP 必须，P1 是核心体验，P2 是锦上添花
-4. **依赖关系必须显式声明** — 不要假设 AI 能推断隐含依赖
-5. **端点标注清晰** — 明确每个功能出现在哪些端（Client/Admin/Operation）
+1. **先画树，再列清单** — 先输出树状视图，再输出明细表
+2. **Feature 必须是叶子节点** — Domain / Module / Submodule 不能直接下游引用
+3. **复杂模块使用 submodules 显式建模** — 不要只把子层级压进 `tree_path` 文本
+4. **每个功能必须有唯一 ID 和 tree_path** — 后续所有引用都基于此 ID 与树路径
+5. **优先级必须明确** — P0 是 MVP 必须，P1 是核心体验，P2 是锦上添花
+6. **依赖关系必须显式声明** — 不要假设 AI 能推断隐含依赖
+7. **端点标注清晰** — 明确每个功能出现在哪些端（Client/Admin/Operation）
 
 ### 编写 L2 的最佳实践
 
-1. **一个用例只描述一个完整场景** — 不要混合多个不相关流程
-2. **主流程步骤不超过 10 步** — 超过则拆分为子用例
-3. **替代流和异常流必须完整** — 这是开发最容易遗漏的部分
-4. **每步都标注 UI 引用** — 让开发知道对应哪个页面/组件
-5. **数据变更必须声明** — 让后端知道涉及哪些实体操作
+1. **一个用例就是一条完整路径** — 不要混合多个不相关目标
+2. **先列 feature_path，再写步骤** — 先确认串联了哪些叶子功能点
+3. **feature_path 必须等于 `ordered_unique(main_flow.feature_id)`** — 否则不算真正完成串联设计
+4. **每步都标注 step_id + feature_id + UI 引用** — 同时告诉开发“路径位置”“功能归属”和“页面归属”
+5. **主流程步骤不超过 10 步** — 超过则拆分为子路径
+6. **替代流和异常流必须完整** — 这是开发最容易遗漏的部分
+7. **数据变更必须声明** — 让后端知道涉及哪些实体操作
 
 ### 编写 L3 的最佳实践
 
-1. **一个 Story 只做一件事** — 遵循 INVEST 原则
-2. **AC 必须用 Given-When-Then** — 不要用模糊描述
-3. **每个 Story 至少 3 条 AC** — 正常流 + 边界 + 异常
-4. **AC 的 Then 必须可观测** — "系统处理成功"不是好的 Then，"跳转首页并显示欢迎弹窗"才是
-5. **DoD 不要遗漏非功能项** — 埋点、文档、CR 都是 DoD 的一部分
-6. **按迭代分组** — 让开发清楚每个迭代的交付范围
+1. **一个 Story = 一条完整路径** — 如果路径过大，先回到 L2 拆分 UseCase，不要在 L3 拆碎
+2. **Story 必须标明 primary_use_case、source_use_cases 和 path_steps_ref** — 否则无法追溯
+3. **Story 必须携带完整 journey_contract** — 至少包含目标、入口、出口、成功结果、失败结果
+4. **AC 必须用 Given-When-Then** — 不要用模糊描述
+5. **每个 Story 至少 3 条 AC** — 正常流 + 边界 + 异常
+6. **AC 的 Then 必须可观测** — "系统处理成功"不是好的 Then，"跳转首页并显示欢迎弹窗"才是
+7. **DoD 不要遗漏非功能项** — 埋点、文档、CR 都是 DoD 的一部分
+8. **按迭代分组** — 让开发清楚每个迭代的交付范围

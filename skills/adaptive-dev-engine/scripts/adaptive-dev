@@ -105,14 +105,26 @@ git_auto_commit() {
     [ "$GIT_AUTO_COMMIT" != "true" ] && return
     [ ! -d "$PROJECT_DIR/.git" ] && return
     local session_num=$(get_json "['sessions']['count']" 2>/dev/null || echo 0)
+    local commit_hash=""
     (
         cd "$PROJECT_DIR"
         git add -A -- ':!.dev-state' 2>/dev/null || true
         if ! git diff --cached --quiet 2>/dev/null; then
             git commit -m "auto: pre-session-${session_num} checkpoint" --no-verify 2>/dev/null || true
+            commit_hash=$(git rev-parse --short HEAD 2>/dev/null || echo "")
+        else
+            commit_hash=$(git rev-parse --short HEAD 2>/dev/null || echo "")
         fi
+        echo "$commit_hash"
     )
-    log "Git checkpoint: pre-session-${session_num}"
+    # Capture the commit hash from the subshell
+    commit_hash=$( cd "$PROJECT_DIR" && git rev-parse --short HEAD 2>/dev/null || echo "" )
+    if [ -n "$commit_hash" ]; then
+        set_json "d.setdefault('sandbox', {})['wip_commit'] = '$commit_hash'; d['sandbox']['consecutive_failures'] = 0"
+        log "Git checkpoint: pre-session-${session_num} → $commit_hash"
+    else
+        log "Git checkpoint: pre-session-${session_num} (no hash)"
+    fi
 }
 
 git_rollback() {
@@ -297,6 +309,8 @@ _init_state() {
   "decision_log": [],
   "blockers": [],
   "errors": [],
+  "sandbox": {"wip_commit": null, "consecutive_failures": 0, "total_rollbacks": 0, "last_rollback_at": null},
+  "engine": {"current_expert": null, "expert_started_at": null, "session_role_history": []},
   "sessions": {"count": 0, "total_turns": 0, "current_session": null},
   "last_heartbeat": "$ts",
   "metrics": {"total_duration_seconds": 0, "parallel_executions": 0, "avg_health_delta_per_session": 0}
@@ -460,9 +474,55 @@ _start_daemon() {
                             send_alert "ERROR" "连续错误过多，已停止"
                             exit 1
                         fi
-                        git_rollback
                         ;;
                 esac
+
+                # === V3 HARD 3-STRIKE ROLLBACK ===
+                # Compare pre-session vs post-session health to detect regression.
+                # If health regressed 3 consecutive sessions, hard-reset to WIP commit.
+                local pre_health=$health_score
+                local post_health=$(get_json "['health']['score']" 2>/dev/null || echo 0)
+                local health_delta=$((post_health - pre_health))
+
+                if [ "$health_delta" -lt 0 ]; then
+                    # Health regressed — increment consecutive failure counter
+                    local consec=$(get_json "['sandbox']['consecutive_failures']" 2>/dev/null || echo 0)
+                    consec=$((consec + 1))
+                    log "WARN: Health regressed ($pre_health → $post_health), consecutive failure #$consec"
+
+                    if [ "$consec" -ge 3 ]; then
+                        # === HARD ROLLBACK ===
+                        local wip_commit=$(get_json "['sandbox']['wip_commit']" 2>/dev/null || echo "")
+                        if [ -n "$wip_commit" ] && [ -d "$PROJECT_DIR/.git" ]; then
+                            log "ROLLBACK: 3 consecutive health regressions — resetting to $wip_commit"
+                            ( cd "$PROJECT_DIR" && git reset --hard "$wip_commit" 2>/dev/null )
+                            set_json "
+d.setdefault('sandbox', {})['consecutive_failures'] = 0
+d['sandbox']['total_rollbacks'] = d['sandbox'].get('total_rollbacks', 0) + 1
+from datetime import datetime, timezone
+d['sandbox']['last_rollback_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+d.setdefault('blockers', []).append({'type': 'auto_rollback', 'message': f'3 consecutive health regressions ({pre_health} -> {post_health}), rolled back to {wip_commit}', 'timestamp': d['last_heartbeat'], 'commit': '$wip_commit'})
+d['blockers'] = d['blockers'][-20:]
+"
+                            send_alert "WARN" "Hard rollback to $wip_commit after 3 regressions"
+                        else
+                            log "WARN: Cannot rollback — no WIP commit or no git"
+                            set_json "d.setdefault('sandbox', {})['consecutive_failures'] = 0"
+                        fi
+                        # Re-run health check after rollback
+                        if [ -f "$HEALTH_CHECK" ]; then
+                            python3 "$HEALTH_CHECK" --project-dir "$PROJECT_DIR" --update 2>/dev/null
+                        fi
+                    else
+                        set_json "d.setdefault('sandbox', {})['consecutive_failures'] = $consec"
+                    fi
+                else
+                    # Health improved or stayed flat — reset failure counter
+                    if [ "$health_delta" -gt 0 ]; then
+                        log "Health improved: $pre_health → $post_health (+$health_delta)"
+                    fi
+                    set_json "d.setdefault('sandbox', {})['consecutive_failures'] = 0"
+                fi
 
                 # Check completion
                 local new_status=$(get_json "['status']")
@@ -618,7 +678,30 @@ try:
     if blockers:
         parts.append(f"\n## Blockers ({len(blockers)})")
         for b in blockers[-3:]:
-            parts.append(f"- {b}")
+            if isinstance(b, dict):
+                parts.append(f"- [{b.get('type', '?')}] {b.get('message', str(b))}")
+            else:
+                parts.append(f"- {b}")
+
+    # V3: Sandbox state
+    sb = s.get('sandbox', {})
+    if sb.get('wip_commit'):
+        parts.append(f"\n## Sandbox State")
+        parts.append(f"- WIP Commit: {sb['wip_commit']}")
+        parts.append(f"- Consecutive Failures: {sb.get('consecutive_failures', 0)}")
+        parts.append(f"- Total Rollbacks: {sb.get('total_rollbacks', 0)}")
+        if sb.get('last_rollback_at'):
+            parts.append(f"- Last Rollback: {sb['last_rollback_at']}")
+        if sb.get('consecutive_failures', 0) >= 2:
+            parts.append(f"**⚠️ WARNING: {sb['consecutive_failures']} consecutive health regressions. Next regression triggers HARD ROLLBACK.**")
+
+    # V3: Engine / Expert state
+    eng = s.get('engine', {})
+    if eng.get('current_expert'):
+        parts.append(f"\n## Active Expert")
+        parts.append(f"- Role: {eng['current_expert']}")
+        if eng.get('expert_started_at'):
+            parts.append(f"- Since: {eng['expert_started_at']}")
 
     errors = s.get('errors', [])
     if errors:
